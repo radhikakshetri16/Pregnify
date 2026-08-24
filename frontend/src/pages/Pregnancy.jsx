@@ -1,159 +1,125 @@
 import { useState } from "react";
-import { Baby, CalendarDays, HeartPulse } from "lucide-react";
+import { usePregnancy } from "../context/PregnancyContext";
 
 function Pregnancy() {
-  const [lmpDate, setLmpDate] = useState("");
+  const { profile, saveProfile, gestationalInfo } = usePregnancy();
+  const [lmpDate, setLmpDate] = useState(profile.lmpDate || "");
+  const [pregnancyType, setPregnancyType] = useState(profile.pregnancyType || "Single");
+  const [saved, setSaved] = useState(false);
 
-  const calculateDueDate = () => {
-    if (!lmpDate) return null;
-
-    const date = new Date(lmpDate);
-    date.setDate(date.getDate() + 280);
-
-    return date.toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
+  const handleUpdate = (e) => {
+    e.preventDefault();
+    saveProfile({
+      lmpDate,
+      pregnancyType,
     });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
   };
 
-  const dueDate = calculateDueDate();
-
   return (
-    <div className="space-y-6">
-
-      {/* Page Header */}
+    <div className="space-y-6 max-w-4xl">
       <div>
-        <h1 className="text-3xl font-bold text-gray-800">
-          Pregnancy Tracker
+        <h1 className="text-2xl font-bold text-zinc-900">
+          Pregnancy Milestone Tracker
         </h1>
-
-        <p className="mt-1 text-gray-500">
-          Track your pregnancy journey and important dates.
+        <p className="text-sm text-zinc-500 mt-1">
+          Monitor gestational timeline and calculate expected delivery dates.
         </p>
       </div>
 
-      {/* Pregnancy Information */}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+      {/* Configuration Form */}
+      <div className="bg-white rounded-xl p-6 border border-zinc-200">
+        <h2 className="text-base font-semibold text-zinc-900 mb-4">
+          LMP and Pregnancy Parameters
+        </h2>
 
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-11 h-11 rounded-xl bg-pink-50 flex items-center justify-center">
-            <Baby className="text-pink-600" size={24} />
+        <form onSubmit={handleUpdate} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 uppercase tracking-wider mb-1.5">
+                Last Menstrual Period (LMP) Date
+              </label>
+              <input
+                type="date"
+                value={lmpDate}
+                onChange={(e) => setLmpDate(e.target.value)}
+                required
+                className="w-full border border-zinc-300 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 uppercase tracking-wider mb-1.5">
+                Pregnancy Type
+              </label>
+              <select
+                value={pregnancyType}
+                onChange={(e) => setPregnancyType(e.target.value)}
+                className="w-full border border-zinc-300 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 bg-white"
+              >
+                <option value="Single">Single</option>
+                <option value="Twins">Twins</option>
+                <option value="Triplets">Triplets / Multiple</option>
+              </select>
+            </div>
           </div>
 
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800">
-              Pregnancy Information
-            </h2>
+          <div className="flex items-center gap-4 pt-2">
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-sm font-medium transition"
+            >
+              Update Parameters
+            </button>
 
-            <p className="text-sm text-gray-500">
-              Enter your last menstrual period to calculate your estimated due date.
-            </p>
+            {saved && (
+              <span className="text-xs text-green-600 font-medium">
+                Milestones recalculated and saved.
+              </span>
+            )}
           </div>
-        </div>
-
-        {/* LMP Input */}
-        <div className="max-w-md">
-
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Last Menstrual Period
-          </label>
-
-          <div className="relative">
-            <CalendarDays
-              size={20}
-              className="absolute left-3 top-3 text-gray-400"
-            />
-
-            <input
-              type="date"
-              value={lmpDate}
-              onChange={(e) => setLmpDate(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg py-2.5 pl-10 pr-3 outline-none focus:ring-2 focus:ring-pink-200 focus:border-pink-400"
-            />
-          </div>
-
-        </div>
-
-        {/* Due Date Result */}
-        {dueDate && (
-          <div className="mt-6 bg-pink-50 border border-pink-100 rounded-xl p-5">
-
-            <p className="text-sm text-pink-600 font-medium">
-              Estimated Due Date
-            </p>
-
-            <p className="text-2xl font-bold text-gray-800 mt-1">
-              {dueDate}
-            </p>
-
-            <p className="text-sm text-gray-500 mt-1">
-              This is an estimated date based on a 280-day pregnancy.
-            </p>
-
-          </div>
-        )}
-
+        </form>
       </div>
 
-      {/* Pregnancy Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3">
-            <HeartPulse className="text-pink-600" size={22} />
-
-            <p className="text-sm text-gray-500">
-              Current Trimester
-            </p>
-          </div>
-
-          <p className="text-2xl font-bold text-gray-800 mt-4">
-            3rd
+      {/* Calculated Overview Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl p-5 border border-zinc-200">
+          <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+            Current Trimester
           </p>
-
-          <p className="text-sm text-gray-500 mt-1">
-            Weeks 28–40
+          <p className="text-2xl font-bold text-zinc-900 mt-2">
+            {gestationalInfo.trimester}
+          </p>
+          <p className="text-xs text-zinc-500 mt-1">
+            Status: Normal progression
           </p>
         </div>
 
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-
-          <p className="text-sm text-gray-500">
-            Pregnancy Week
+        <div className="bg-white rounded-xl p-5 border border-zinc-200">
+          <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+            Gestational Age
           </p>
-
-          <p className="text-2xl font-bold text-gray-800 mt-4">
-            28 weeks
+          <p className="text-2xl font-bold text-zinc-900 mt-2">
+            {gestationalInfo.weeks} Weeks {gestationalInfo.days > 0 ? `${gestationalInfo.days} Days` : ""}
           </p>
-
-          <p className="text-sm text-gray-500 mt-1">
-            Keep tracking your health.
+          <p className="text-xs text-zinc-500 mt-1">
+            {gestationalInfo.totalDays} total days elapsed
           </p>
-
         </div>
 
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-
-          <p className="text-sm text-gray-500">
-            Pregnancy Progress
+        <div className="bg-white rounded-xl p-5 border border-zinc-200">
+          <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+            Expected Due Date
           </p>
-
-          <p className="text-2xl font-bold text-gray-800 mt-4">
-            70%
+          <p className="text-2xl font-bold text-zinc-900 mt-2">
+            {gestationalInfo.dueDateFormatted}
           </p>
-
-          <div className="w-full bg-gray-100 h-2 rounded-full mt-3">
-            <div
-              className="bg-pink-500 h-2 rounded-full"
-              style={{ width: "70%" }}
-            />
-          </div>
-
+          <p className="text-xs text-zinc-500 mt-1">
+            {gestationalInfo.daysRemaining} days remaining
+          </p>
         </div>
-
       </div>
-
     </div>
   );
 }

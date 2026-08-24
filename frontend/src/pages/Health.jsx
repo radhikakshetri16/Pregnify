@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { HeartPulse, Save } from "lucide-react";
+import { HeartPulse, Save, CheckCircle2, History } from "lucide-react";
+import { usePregnancy } from "../context/PregnancyContext";
 
 function Health() {
+  const { profile, healthLogs, addHealthRecord } = usePregnancy();
+
   const [formData, setFormData] = useState({
-    weight: "",
-    bloodPressure: "",
-    heartRate: "",
+    weight: profile.weight || "",
+    bloodPressure: profile.bloodPressure || "",
+    heartRate: profile.heartRate || "",
     symptoms: "",
     notes: "",
   });
@@ -17,224 +20,148 @@ function Health() {
       ...formData,
       [e.target.name]: e.target.value,
     });
-
     setSaved(false);
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-
+    addHealthRecord(formData);
     setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
   };
 
   return (
-    <div className="space-y-6">
-
-      {/* Header */}
+    <div className="space-y-6 max-w-4xl">
       <div>
-        <h1 className="text-3xl font-bold text-gray-800">
-          Health Tracker
+        <h1 className="text-2xl font-bold text-zinc-900">
+          Health and Clinical Vitals
         </h1>
-
-        <p className="mt-1 text-gray-500">
-          Record and monitor your pregnancy health information.
+        <p className="text-sm text-zinc-500 mt-1">
+          Record daily vitals. Entries automatically update your dashboard and backend history.
         </p>
       </div>
 
-      {/* Form */}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+      {/* Entry Form */}
+      <div className="bg-white rounded-xl p-6 border border-zinc-200">
+        <h2 className="text-base font-semibold text-zinc-900 mb-4">
+          Record Today's Health Entry
+        </h2>
 
-        <div className="flex items-center gap-3 mb-6">
-
-          <div className="w-11 h-11 rounded-xl bg-pink-50 flex items-center justify-center">
-            <HeartPulse
-              className="text-pink-600"
-              size={24}
-            />
-          </div>
-
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800">
-              Record Today's Health
-            </h2>
-
-            <p className="text-sm text-gray-500">
-              Enter your latest health measurements.
-            </p>
-          </div>
-
-        </div>
-
-        <form onSubmit={handleSubmit}>
-
-          {/* Measurements */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-
-            {/* Weight */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-xs font-semibold text-zinc-700 uppercase tracking-wider mb-1.5">
                 Weight (kg)
               </label>
-
               <input
                 type="number"
                 step="0.1"
                 name="weight"
                 value={formData.weight}
                 onChange={handleChange}
-                placeholder="e.g. 62.5"
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-pink-200 focus:border-pink-400"
+                placeholder="62.5"
+                className="w-full border border-zinc-300 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
               />
             </div>
 
-            {/* Blood Pressure */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Blood Pressure
+              <label className="block text-xs font-semibold text-zinc-700 uppercase tracking-wider mb-1.5">
+                Blood Pressure (mmHg)
               </label>
-
               <input
                 type="text"
                 name="bloodPressure"
                 value={formData.bloodPressure}
                 onChange={handleChange}
-                placeholder="e.g. 118/78"
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-pink-200 focus:border-pink-400"
+                placeholder="118/78"
+                className="w-full border border-zinc-300 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
               />
             </div>
 
-            {/* Heart Rate */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-xs font-semibold text-zinc-700 uppercase tracking-wider mb-1.5">
                 Heart Rate (bpm)
               </label>
-
               <input
                 type="number"
                 name="heartRate"
                 value={formData.heartRate}
                 onChange={handleChange}
-                placeholder="e.g. 76"
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-pink-200 focus:border-pink-400"
+                placeholder="76"
+                className="w-full border border-zinc-300 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
               />
             </div>
-
           </div>
 
-          {/* Symptoms */}
-          <div className="mt-5">
-
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Symptoms
+          <div>
+            <label className="block text-xs font-semibold text-zinc-700 uppercase tracking-wider mb-1.5">
+              Observed Symptoms
             </label>
-
             <input
               type="text"
               name="symptoms"
               value={formData.symptoms}
               onChange={handleChange}
-              placeholder="e.g. Headache, nausea, back pain"
-              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-pink-200 focus:border-pink-400"
+              placeholder="e.g. Mild headache, back fatigue"
+              className="w-full border border-zinc-300 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900"
             />
-
           </div>
 
-          {/* Notes */}
-          <div className="mt-5">
-
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Additional Notes
+          <div>
+            <label className="block text-xs font-semibold text-zinc-700 uppercase tracking-wider mb-1.5">
+              Clinical Notes
             </label>
-
             <textarea
               name="notes"
               value={formData.notes}
               onChange={handleChange}
-              rows="4"
-              placeholder="Add any additional information..."
-              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-pink-200 focus:border-pink-400 resize-none"
+              rows="3"
+              placeholder="Medication compliance, hydration, nutritional notes..."
+              className="w-full border border-zinc-300 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 resize-none"
             />
-
           </div>
 
-          {/* Save */}
-          <div className="mt-6 flex items-center gap-4">
-
+          <div className="flex items-center gap-4 pt-2">
             <button
               type="submit"
-              className="flex items-center gap-2 px-6 py-2.5 bg-pink-600 text-white rounded-lg font-medium hover:bg-pink-700 transition"
+              className="px-5 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-sm font-medium transition"
             >
-              <Save size={18} />
               Save Health Record
             </button>
 
             {saved && (
-              <p className="text-sm text-green-600 font-medium">
-                Health record saved successfully!
-              </p>
+              <span className="text-xs text-green-600 font-medium">
+                Record saved and synchronized.
+              </span>
             )}
-
           </div>
-
         </form>
-
       </div>
 
-      {/* Latest Record */}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+      {/* History Log */}
+      {healthLogs.length > 0 && (
+        <div className="bg-white rounded-xl p-6 border border-zinc-200 space-y-3">
+          <h2 className="text-base font-semibold text-zinc-900">Recent Health Logs</h2>
 
-        <h2 className="text-lg font-semibold text-gray-800">
-          Latest Health Record
-        </h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mt-5">
-
-          <div className="bg-gray-50 rounded-xl p-5">
-            <p className="text-sm text-gray-500">
-              Weight
-            </p>
-
-            <p className="text-2xl font-bold text-gray-800 mt-2">
-              {formData.weight || "--"} kg
-            </p>
+          <div className="divide-y divide-zinc-100">
+            {healthLogs.map((log) => (
+              <div key={log.id} className="py-3 flex items-center justify-between text-xs">
+                <div>
+                  <p className="font-semibold text-zinc-800">{log.date}</p>
+                  <p className="text-zinc-500 mt-0.5">
+                    {log.symptoms || "Regular checkup"} {log.notes && `· ${log.notes}`}
+                  </p>
+                </div>
+                <div className="text-right text-zinc-700 font-medium">
+                  {log.weight && <span className="mr-3">{log.weight} kg</span>}
+                  {log.bloodPressure && <span className="mr-3">{log.bloodPressure} mmHg</span>}
+                  {log.heartRate && <span>{log.heartRate} bpm</span>}
+                </div>
+              </div>
+            ))}
           </div>
-
-          <div className="bg-gray-50 rounded-xl p-5">
-            <p className="text-sm text-gray-500">
-              Blood Pressure
-            </p>
-
-            <p className="text-2xl font-bold text-gray-800 mt-2">
-              {formData.bloodPressure || "--"}
-            </p>
-          </div>
-
-          <div className="bg-gray-50 rounded-xl p-5">
-            <p className="text-sm text-gray-500">
-              Heart Rate
-            </p>
-
-            <p className="text-2xl font-bold text-gray-800 mt-2">
-              {formData.heartRate || "--"} bpm
-            </p>
-          </div>
-
         </div>
-
-        {formData.symptoms && (
-          <div className="mt-5">
-            <p className="text-sm text-gray-500">
-              Symptoms
-            </p>
-
-            <p className="text-gray-700 mt-1">
-              {formData.symptoms}
-            </p>
-          </div>
-        )}
-
-      </div>
-
+      )}
     </div>
   );
 }
