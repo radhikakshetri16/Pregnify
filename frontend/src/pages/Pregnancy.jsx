@@ -1,158 +1,345 @@
-import { useState } from "react";
-import { Baby, CalendarDays, HeartPulse } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  CalendarDays,
+  HeartPulse,
+  Clock,
+  Activity,
+  Save,
+} from "lucide-react";
 
 function Pregnancy() {
-  const [lmpDate, setLmpDate] = useState("");
+  const [pregnancy, setPregnancy] = useState(null);
+  const [lmp, setLmp] = useState("");
+  const [notes, setNotes] = useState("");
 
-  const calculateDueDate = () => {
-    if (!lmpDate) return null;
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-    const date = new Date(lmpDate);
-    date.setDate(date.getDate() + 280);
+  const user = JSON.parse(localStorage.getItem("user"));
 
-    return date.toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+  const fetchPregnancy = async () => {
+    if (!user?.id) {
+      setError("You must be logged in.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:5000/api/pregnancy?user_id=${user.id}`
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || "Unable to load pregnancy information.");
+        return;
+      }
+
+      setPregnancy(data.pregnancy);
+
+      if (data.pregnancy) {
+        setLmp(data.pregnancy.last_menstrual_date || "");
+        setNotes(data.pregnancy.notes || "");
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Unable to connect to the server.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const dueDate = calculateDueDate();
+  useEffect(() => {
+    fetchPregnancy();
+  }, []);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    setError("");
+    setSuccess("");
+    setSaving(true);
+
+    try {
+      const response = await fetch(
+        "http://127.0.0.1:5000/api/pregnancy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            user_id: user.id,
+            last_menstrual_date: lmp,
+            notes,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || "Unable to save pregnancy.");
+        return;
+      }
+
+      setSuccess("Pregnancy information saved successfully.");
+
+      await fetchPregnancy();
+    } catch (err) {
+      console.error(err);
+      setError("Unable to connect to the server.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <p className="text-gray-500">Loading pregnancy information...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-6xl mx-auto">
 
-      {/* Page Header */}
-      <div>
+      {/* Header */}
+      <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800">
-          Pregnancy Tracker
+          Pregnancy
         </h1>
 
-        <p className="mt-1 text-gray-500">
-          Track your pregnancy journey and important dates.
+        <p className="text-gray-500 mt-2">
+          Track your pregnancy progress and important dates.
         </p>
       </div>
 
-      {/* Pregnancy Information */}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+      {/* No pregnancy yet */}
+      {!pregnancy && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
 
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-11 h-11 rounded-xl bg-pink-50 flex items-center justify-center">
-            <Baby className="text-pink-600" size={24} />
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-3 bg-pink-50 rounded-xl">
+              <HeartPulse className="text-pink-600" size={24} />
+            </div>
+
+            <div>
+              <h2 className="text-xl font-semibold text-gray-800">
+                Add Pregnancy Information
+              </h2>
+
+              <p className="text-sm text-gray-500">
+                Enter your Last Menstrual Period (LMP).
+              </p>
+            </div>
           </div>
 
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800">
-              Pregnancy Information
+          <form onSubmit={handleSubmit} className="space-y-5">
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Last Menstrual Period
+              </label>
+
+              <input
+                type="date"
+                value={lmp}
+                onChange={(e) => setLmp(e.target.value)}
+                required
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg
+                           focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+
+              <p className="text-xs text-gray-500 mt-2">
+                Your expected due date and pregnancy progress will be
+                calculated automatically.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Notes <span className="text-gray-400">(optional)</span>
+              </label>
+
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows="4"
+                placeholder="Add any pregnancy-related notes..."
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg
+                           focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex items-center justify-center gap-2 w-full
+                         bg-pink-600 text-white py-3 rounded-lg
+                         font-medium hover:bg-pink-700
+                         disabled:opacity-50"
+            >
+              <Save size={18} />
+
+              {saving ? "Saving..." : "Save Pregnancy Information"}
+            </button>
+
+          </form>
+        </div>
+      )}
+
+      {/* Pregnancy information */}
+      {pregnancy && (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">
+                    Pregnancy Week
+                  </p>
+
+                  <p className="text-2xl font-bold text-gray-800 mt-2">
+                    Week {pregnancy.pregnancy_week}
+                  </p>
+                </div>
+
+                <div className="p-3 bg-pink-50 rounded-xl">
+                  <HeartPulse className="text-pink-600" size={22} />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">
+                    Trimester
+                  </p>
+
+                  <p className="text-lg font-bold text-gray-800 mt-2">
+                    {pregnancy.trimester}
+                  </p>
+                </div>
+
+                <div className="p-3 bg-purple-50 rounded-xl">
+                  <Activity className="text-purple-600" size={22} />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">
+                    Progress
+                  </p>
+
+                  <p className="text-2xl font-bold text-gray-800 mt-2">
+                    {pregnancy.progress_percentage}%
+                  </p>
+                </div>
+
+                <div className="p-3 bg-green-50 rounded-xl">
+                  <Clock className="text-green-600" size={22} />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">
+                    Status
+                  </p>
+
+                  <p className="text-lg font-bold text-green-600 mt-2">
+                    {pregnancy.pregnancy_status}
+                  </p>
+                </div>
+
+                <div className="p-3 bg-green-50 rounded-xl">
+                  <CalendarDays
+                    className="text-green-600"
+                    size={22}
+                  />
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Pregnancy details */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-7">
+
+            <h2 className="text-xl font-semibold text-gray-800 mb-6">
+              Pregnancy Details
             </h2>
 
-            <p className="text-sm text-gray-500">
-              Enter your last menstrual period to calculate your estimated due date.
-            </p>
-          </div>
-        </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-        {/* LMP Input */}
-        <div className="max-w-md">
+              <div>
+                <p className="text-sm text-gray-500">
+                  Last Menstrual Period
+                </p>
 
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Last Menstrual Period
-          </label>
+                <p className="text-lg font-medium text-gray-800 mt-1">
+                  {pregnancy.last_menstrual_date}
+                </p>
+              </div>
 
-          <div className="relative">
-            <CalendarDays
-              size={20}
-              className="absolute left-3 top-3 text-gray-400"
-            />
+              <div>
+                <p className="text-sm text-gray-500">
+                  Expected Due Date
+                </p>
 
-            <input
-              type="date"
-              value={lmpDate}
-              onChange={(e) => setLmpDate(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg py-2.5 pl-10 pr-3 outline-none focus:ring-2 focus:ring-pink-200 focus:border-pink-400"
-            />
-          </div>
+                <p className="text-lg font-medium text-gray-800 mt-1">
+                  {pregnancy.due_date}
+                </p>
+              </div>
 
-        </div>
+            </div>
 
-        {/* Due Date Result */}
-        {dueDate && (
-          <div className="mt-6 bg-pink-50 border border-pink-100 rounded-xl p-5">
+            {pregnancy.notes && (
+              <div className="mt-6">
+                <p className="text-sm text-gray-500">
+                  Notes
+                </p>
 
-            <p className="text-sm text-pink-600 font-medium">
-              Estimated Due Date
-            </p>
-
-            <p className="text-2xl font-bold text-gray-800 mt-1">
-              {dueDate}
-            </p>
-
-            <p className="text-sm text-gray-500 mt-1">
-              This is an estimated date based on a 280-day pregnancy.
-            </p>
+                <p className="text-gray-700 mt-1">
+                  {pregnancy.notes}
+                </p>
+              </div>
+            )}
 
           </div>
-        )}
 
-      </div>
+          {success && (
+            <div className="mt-5 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg">
+              {success}
+            </div>
+          )}
+        </>
+      )}
 
-      {/* Pregnancy Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3">
-            <HeartPulse className="text-pink-600" size={22} />
-
-            <p className="text-sm text-gray-500">
-              Current Trimester
-            </p>
-          </div>
-
-          <p className="text-2xl font-bold text-gray-800 mt-4">
-            3rd
-          </p>
-
-          <p className="text-sm text-gray-500 mt-1">
-            Weeks 28–40
-          </p>
+      {error && pregnancy && (
+        <div className="mt-5 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg">
+          {error}
         </div>
-
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-
-          <p className="text-sm text-gray-500">
-            Pregnancy Week
-          </p>
-
-          <p className="text-2xl font-bold text-gray-800 mt-4">
-            28 weeks
-          </p>
-
-          <p className="text-sm text-gray-500 mt-1">
-            Keep tracking your health.
-          </p>
-
-        </div>
-
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-
-          <p className="text-sm text-gray-500">
-            Pregnancy Progress
-          </p>
-
-          <p className="text-2xl font-bold text-gray-800 mt-4">
-            70%
-          </p>
-
-          <div className="w-full bg-gray-100 h-2 rounded-full mt-3">
-            <div
-              className="bg-pink-500 h-2 rounded-full"
-              style={{ width: "70%" }}
-            />
-          </div>
-
-        </div>
-
-      </div>
+      )}
 
     </div>
   );

@@ -1,15 +1,15 @@
-function Messages() {
+function Medicalhistory() {
   return (
     <div>
       <h1 className="text-3xl font-bold text-gray-800">
-        Messages
+        Medical History
       </h1>
 
       <p className="mt-2 text-gray-500">
-        Communicate with your healthcare provider.
+        Write your medical history.
       </p>
     </div>
   );
 }
 
-export default Messages;
+export default Medicalhistory;
