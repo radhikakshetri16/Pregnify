@@ -1,6 +1,5 @@
-from werkzeug.security import check_password_hash
 from flask import Blueprint, request, jsonify
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 
 from database.db import get_db_connection
 
@@ -35,7 +34,11 @@ def register():
 
     try:
         existing_user = connection.execute(
-            "SELECT id FROM users WHERE email = ?",
+            """
+            SELECT user_id
+            FROM USER
+            WHERE email = ?
+            """,
             (email,)
         ).fetchone()
 
@@ -48,10 +51,10 @@ def register():
 
         cursor = connection.execute(
             """
-            INSERT INTO users (name, email, password_hash, role)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO USER (name, email, password)
+            VALUES (?, ?, ?)
             """,
-            (name, email, password_hash, "patient")
+            (name, email, password_hash)
         )
 
         connection.commit()
@@ -61,13 +64,13 @@ def register():
             "user": {
                 "id": cursor.lastrowid,
                 "name": name,
-                "email": email,
-                "role": "patient"
+                "email": email
             }
         }), 201
 
     finally:
         connection.close()
+
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
@@ -91,8 +94,8 @@ def login():
     try:
         user = connection.execute(
             """
-            SELECT id, name, email, password_hash, role
-            FROM users
+            SELECT user_id, name, email, password
+            FROM USER
             WHERE email = ?
             """,
             (email,)
@@ -103,7 +106,7 @@ def login():
                 "error": "Invalid email or password"
             }), 401
 
-        if not check_password_hash(user["password_hash"], password):
+        if not check_password_hash(user["password"], password):
             return jsonify({
                 "error": "Invalid email or password"
             }), 401
@@ -111,10 +114,9 @@ def login():
         return jsonify({
             "message": "Login successful",
             "user": {
-                "id": user["id"],
+                "id": user["user_id"],
                 "name": user["name"],
-                "email": user["email"],
-                "role": user["role"]
+                "email": user["email"]
             }
         }), 200
 
