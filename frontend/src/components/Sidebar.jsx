@@ -19,8 +19,8 @@ function Sidebar() {
     // Remove the logged-in user from browser storage
     localStorage.removeItem("user");
 
-    // Return to login page
-    navigate("/login");
+    // Return to login page with history replacement
+    navigate("/login", { replace: true });
   };
 
   return (

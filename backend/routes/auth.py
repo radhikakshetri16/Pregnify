@@ -1,3 +1,4 @@
+import re
 from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -5,6 +6,28 @@ from database.db import get_db_connection
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
+
+
+def validate_password_complexity(password: str):
+    """
+    Validate password complexity:
+    - At least 6 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character
+    """
+    if not password or len(password) < 6:
+        return False, "Password must be at least 6 characters long."
+    if not re.search(r"[A-Z]", password):
+        return False, "Password must contain at least one uppercase letter."
+    if not re.search(r"[a-z]", password):
+        return False, "Password must contain at least one lowercase letter."
+    if not re.search(r"\d", password):
+        return False, "Password must contain at least one number."
+    if not re.search(r"[^A-Za-z0-9]", password):
+        return False, "Password must contain at least one special character."
+    return True, None
 
 
 @auth_bp.route("/register", methods=["POST"])
@@ -23,7 +46,7 @@ def register():
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
 
-    age = data.get("age")
+    raw_age = data.get("age")
     gender = data.get("gender", "").strip()
     phone = data.get("phone", "").strip()
 
@@ -31,7 +54,7 @@ def register():
     # Patient details
     # -----------------------------
     patient_name = data.get("patient_name", "").strip()
-    patient_age = data.get("patient_age")
+    raw_patient_age = data.get("patient_age")
     patient_gender = data.get("patient_gender", "").strip()
     patient_phone = data.get("patient_phone", "").strip()
     patient_address = data.get("patient_address", "").strip()
@@ -45,9 +68,24 @@ def register():
             "error": "Name, email, and password are required"
         }), 400
 
-    if len(password) < 6:
+    # Validate password complexity
+    is_valid_pw, pw_error = validate_password_complexity(password)
+    if not is_valid_pw:
         return jsonify({
-            "error": "Password must be at least 6 characters"
+            "error": pw_error
+        }), 400
+
+    # Validate Account Holder Age
+    if raw_age is None or str(raw_age).strip() == "":
+        return jsonify({
+            "error": "Account holder age is required"
+        }), 400
+
+    try:
+        age = int(raw_age)
+    except (ValueError, TypeError):
+        return jsonify({
+            "error": "Account holder age must be a valid number"
         }), 400
 
     allowed_relationships = {
@@ -60,13 +98,56 @@ def register():
 
     if relationship_type not in allowed_relationships:
         return jsonify({
-            "error": "Invalid relationship type"
+            "error": "Invalid relationship type. Allowed options: Self, Husband, Caretaker, Guardian, Other"
         }), 400
 
-    if not patient_name:
-        return jsonify({
-            "error": "Patient name is required"
-        }), 400
+    # -----------------------------
+    # Age & Relationship Logic
+    # -----------------------------
+    if relationship_type == "Self":
+        # Account Holder IS the Patient
+        if age < 16:
+            return jsonify({
+                "error": "Pregnify is only available for patients aged 16 and above."
+            }), 400
+        if age < 18:
+            return jsonify({
+                "error": "Patients aged 16–17 cannot create an account independently. An adult representative (18+) must create and manage the account."
+            }), 400
+
+        # Self patient details copy from account holder
+        patient_name = name
+        patient_age = age
+        patient_gender = gender
+        patient_phone = phone
+    else:
+        # Account Holder IS NOT the Patient (Representative)
+        if age < 18:
+            return jsonify({
+                "error": "The account holder / representative must be at least 18 years old."
+            }), 400
+
+        if not patient_name:
+            return jsonify({
+                "error": "Patient full name is required"
+            }), 400
+
+        if raw_patient_age is None or str(raw_patient_age).strip() == "":
+            return jsonify({
+                "error": "Patient age is required"
+            }), 400
+
+        try:
+            patient_age = int(raw_patient_age)
+        except (ValueError, TypeError):
+            return jsonify({
+                "error": "Patient age must be a valid number"
+            }), 400
+
+        if patient_age < 16:
+            return jsonify({
+                "error": "Patient must be at least 16 years old. Pregnify does not support registrations for patients below 16."
+            }), 400
 
     connection = get_db_connection()
 

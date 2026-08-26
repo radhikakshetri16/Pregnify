@@ -1,134 +1,110 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
-import Sidebar from "./components/Sidebar";
+// Layouts
+import UserLayout from "./layouts/UserLayout";
+import DoctorLayout from "./layouts/DoctorLayout";
+import AdminLayout from "./layouts/AdminLayout";
 
-import Register from "./pages/Register";
+// Public User Auth Pages
 import Login from "./pages/Login";
+import Register from "./pages/Register";
 
+// Public Doctor Auth Pages
 import DoctorLogin from "./pages/DoctorLogin";
 import DoctorChangePassword from "./pages/DoctorChangePassword";
-import DoctorDashboard from "./pages/DoctorDashboard";
 
+// Public Admin Auth Pages
+import AdminLogin from "./pages/AdminLogin";
+import AdminRegister from "./pages/AdminRegister";
+
+// Protected User Pages
 import Dashboard from "./pages/Dashboard";
 import Pregnancy from "./pages/Pregnancy";
-import Appointments from "./pages/Appointments";
-import Medicines from "./pages/Medicines";
-import Reports from "./pages/Reports";
-import Medicalhistory from "./pages/Medicalhistory";
-import Settings from "./pages/Settings";
 import Health from "./pages/Health";
+import Medicalhistory from "./pages/Medicalhistory";
+import Reports from "./pages/Reports";
+import Medicines from "./pages/Medicines";
+import Appointments from "./pages/Appointments";
+import Settings from "./pages/Settings";
 
+// Protected Doctor Pages
+import DoctorDashboard from "./pages/DoctorDashboard";
+import DoctorPatients from "./pages/DoctorPatients";
+import DoctorPatientDetail from "./pages/DoctorPatientDetail";
+import DoctorAppointments from "./pages/DoctorAppointments";
+import DoctorSettings from "./pages/DoctorSettings";
 
-function AppLayout() {
-  const user = localStorage.getItem("user");
-
-  // User is not logged in
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50 flex">
-      <Sidebar />
-
-      <main className="flex-1 p-8 overflow-y-auto">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-
-          <Route
-            path="/pregnancy"
-            element={<Pregnancy />}
-          />
-
-          <Route
-            path="/appointments"
-            element={<Appointments />}
-          />
-
-          <Route
-            path="/medicines"
-            element={<Medicines />}
-          />
-
-          <Route
-            path="/reports"
-            element={<Reports />}
-          />
-
-          <Route
-            path="/medicalhistory"
-            element={<Medicalhistory />}
-          />
-
-          <Route
-            path="/settings"
-            element={<Settings />}
-          />
-
-          <Route
-            path="/health"
-            element={<Health />}
-          />
-        </Routes>
-      </main>
-    </div>
-  );
-}
-
+// Protected Admin Pages
+import AdminDashboard from "./pages/AdminDashboard";
+import AdminDoctors from "./pages/AdminDoctors";
+import AdminUsers from "./pages/AdminUsers";
+import AdminSettings from "./pages/AdminSettings";
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* =========================================
+            PUBLIC AUTHENTICATION ROUTES
+           ========================================= */}
 
-        {/* =========================
-            USER PUBLIC PAGES
-           ========================= */}
+        {/* User Auth */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
 
-        <Route
-          path="/login"
-          element={<Login />}
-        />
-
-        <Route
-          path="/register"
-          element={<Register />}
-        />
-
-
-        {/* =========================
-            DOCTOR PUBLIC PAGES
-           ========================= */}
-
-        <Route
-          path="/doctor/login"
-          element={<DoctorLogin />}
-        />
-
+        {/* Doctor Auth */}
+        <Route path="/doctor/login" element={<DoctorLogin />} />
         <Route
           path="/doctor/change-password"
           element={<DoctorChangePassword />}
         />
 
-        <Route 
-         path="/doctor/dashboard"
-         element={<DoctorDashboard />}
-        />
+        {/* Admin Auth */}
+        <Route path="/admin/login" element={<AdminLogin />} />
+        <Route path="/admin/register" element={<AdminRegister />} />
 
+        {/* =========================================
+            PROTECTED USER PORTAL ROUTES
+           ========================================= */}
+        <Route path="/" element={<UserLayout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="pregnancy" element={<Pregnancy />} />
+          <Route path="health" element={<Health />} />
+          <Route path="medicalhistory" element={<Medicalhistory />} />
+          <Route path="reports" element={<Reports />} />
+          <Route path="medicines" element={<Medicines />} />
+          <Route path="appointments" element={<Appointments />} />
+          <Route path="settings" element={<Settings />} />
+        </Route>
 
-        {/* =========================
-            USER APPLICATION
-           ========================= */}
+        {/* =========================================
+            PROTECTED DOCTOR PORTAL ROUTES
+           ========================================= */}
+        <Route path="/doctor" element={<DoctorLayout />}>
+          <Route index element={<Navigate to="/doctor/dashboard" replace />} />
+          <Route path="dashboard" element={<DoctorDashboard />} />
+          <Route path="patients" element={<DoctorPatients />} />
+          <Route path="patients/:patientId" element={<DoctorPatientDetail />} />
+          <Route path="appointments" element={<DoctorAppointments />} />
+          <Route path="settings" element={<DoctorSettings />} />
+        </Route>
 
-        <Route
-          path="/*"
-          element={<AppLayout />}
-        />
+        {/* =========================================
+            PROTECTED ADMIN PORTAL ROUTES
+           ========================================= */}
+        <Route path="/admin" element={<AdminLayout />}>
+          <Route index element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="doctors" element={<AdminDoctors />} />
+          <Route path="users" element={<AdminUsers />} />
+          <Route path="settings" element={<AdminSettings />} />
+        </Route>
 
+        {/* Catch-all fallback */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
   );
 }
-
 
 export default App;

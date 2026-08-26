@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-function DoctorLogin() {
+function AdminLogin() {
   const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
@@ -18,7 +18,7 @@ function DoctorLogin() {
 
     try {
       const response = await fetch(
-        "http://127.0.0.1:5000/api/doctors/login",
+        "http://127.0.0.1:5000/api/admin/login",
         {
           method: "POST",
           headers: {
@@ -38,22 +38,13 @@ function DoctorLogin() {
         return;
       }
 
-      // Store doctor information strictly in separate doctor key
-      const doctorData = {
-        ...data.doctor,
-        must_change_password: Boolean(data.must_change_password),
-      };
+      // Store admin information strictly in separate admin key
+      localStorage.setItem("admin", JSON.stringify(data.admin));
 
-      localStorage.setItem("doctor", JSON.stringify(doctorData));
-
-      // First login requires password change
-      if (data.must_change_password) {
-        navigate("/doctor/change-password", { replace: true });
-      } else {
-        navigate("/doctor/dashboard", { replace: true });
-      }
+      // Navigate to admin dashboard with history replace
+      navigate("/admin/dashboard", { replace: true });
     } catch (error) {
-      console.error("Doctor login error:", error);
+      console.error("Admin login error:", error);
       setError("Unable to connect to the server.");
     } finally {
       setLoading(false);
@@ -71,7 +62,7 @@ function DoctorLogin() {
           </h1>
 
           <p className="text-gray-500 mt-2">
-            Sign in to Doctor Portal
+            Sign in to Admin Portal
           </p>
         </div>
 
@@ -81,14 +72,14 @@ function DoctorLogin() {
           {/* Email */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Doctor Email
+              Admin Email
             </label>
 
             <input
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="Enter doctor email"
+              placeholder="Enter admin email"
               required
               className="w-full px-4 py-3 border border-gray-300 rounded-lg
                          focus:outline-none focus:ring-2 focus:ring-pink-500"
@@ -132,8 +123,16 @@ function DoctorLogin() {
             {loading ? "Signing in..." : "Login"}
           </button>
 
-          <p className="text-center text-xs text-gray-400 mt-4">
-            Doctor accounts are managed by the Administrator.
+          {/* Setup / Register Option */}
+          <p className="text-center text-sm text-gray-500">
+            Setup an admin account?{" "}
+            <button
+              type="button"
+              onClick={() => navigate("/admin/register")}
+              className="text-pink-600 font-medium hover:underline"
+            >
+              Register Admin
+            </button>
           </p>
 
         </form>
@@ -142,4 +141,4 @@ function DoctorLogin() {
   );
 }
 
-export default DoctorLogin;
+export default AdminLogin;

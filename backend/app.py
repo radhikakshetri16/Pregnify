@@ -5,6 +5,7 @@ from routes.auth import auth_bp
 from routes.pregnancy import pregnancy_bp
 from routes.health import health_bp
 from routes.doctor import doctor_bp
+from routes.admin import admin_bp
 
 
 app = Flask(__name__)
@@ -15,6 +16,7 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(pregnancy_bp)
 app.register_blueprint(health_bp)
 app.register_blueprint(doctor_bp)
+app.register_blueprint(admin_bp)
 
 @app.route("/")
 def home():

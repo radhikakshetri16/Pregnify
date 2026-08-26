@@ -1,7 +1,7 @@
 
+import re
 from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
-import secrets
 
 from database.db import get_db_connection
 
@@ -11,6 +11,28 @@ doctor_bp = Blueprint(
     __name__,
     url_prefix="/api/doctors"
 )
+
+
+def validate_password_complexity(password: str):
+    """
+    Validate password complexity:
+    - At least 6 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character
+    """
+    if not password or len(password) < 6:
+        return False, "Password must be at least 6 characters long."
+    if not re.search(r"[A-Z]", password):
+        return False, "Password must contain at least one uppercase letter."
+    if not re.search(r"[a-z]", password):
+        return False, "Password must contain at least one lowercase letter."
+    if not re.search(r"\d", password):
+        return False, "Password must contain at least one number."
+    if not re.search(r"[^A-Za-z0-9]", password):
+        return False, "Password must contain at least one special character."
+    return True, None
 
 
 # --------------------------------
@@ -67,6 +89,7 @@ def create_doctor():
 
     name = data.get("name", "").strip()
     email = data.get("email", "").strip().lower()
+    password = data.get("password", "")
     phone = data.get("phone", "").strip()
     specialization = data.get("specialization", "").strip()
     nmc_number = data.get("nmc_number", "").strip()
@@ -81,6 +104,17 @@ def create_doctor():
     if not name or not email or not specialization:
         return jsonify({
             "error": "Name, email, and specialization are required"
+        }), 400
+
+    if not password:
+        return jsonify({
+            "error": "Initial password is required"
+        }), 400
+
+    is_valid_pw, pw_error = validate_password_complexity(password)
+    if not is_valid_pw:
+        return jsonify({
+            "error": pw_error
         }), 400
 
     if not nmc_number:
@@ -171,14 +205,10 @@ def create_doctor():
             }), 409
 
         # -----------------------------
-        # Generate temporary password
+        # Hash provided password
         # -----------------------------
 
-        temporary_password = secrets.token_urlsafe(8)
-
-        password_hash = generate_password_hash(
-            temporary_password
-        )
+        password_hash = generate_password_hash(password)
 
         # -----------------------------
         # Create doctor
@@ -233,10 +263,6 @@ def create_doctor():
                 "practice_at": practice_at,
                 "consultation_fee": consultation_fee,
                 "status": "Active"
-            },
-            "temporary_credentials": {
-                "email": email,
-                "password": temporary_password
             }
         }), 201
 
@@ -606,9 +632,10 @@ def change_doctor_password():
             "error": "doctor_id, current_password, and new_password are required"
         }), 400
 
-    if len(new_password) < 6:
+    is_valid_pw, pw_error = validate_password_complexity(new_password)
+    if not is_valid_pw:
         return jsonify({
-            "error": "New password must be at least 6 characters"
+            "error": pw_error
         }), 400
 
     if current_password == new_password:
@@ -675,4 +702,543 @@ def change_doctor_password():
 
     finally:
         connection.close()
+
+
+# --------------------------------
+# DELETE DOCTOR (ADMIN ACTION)
+# --------------------------------
+@doctor_bp.route("/<int:doctor_id>", methods=["DELETE"])
+def delete_doctor(doctor_id):
+    connection = get_db_connection()
+
+    try:
+        doctor = connection.execute(
+            "SELECT doctor_id FROM DOCTOR WHERE doctor_id = ?",
+            (doctor_id,)
+        ).fetchone()
+
+        if not doctor:
+            return jsonify({
+                "error": "Doctor not found"
+            }), 404
+
+        # Check if doctor has associated appointments or medications
+        has_appointments = connection.execute(
+            "SELECT 1 FROM APPOINTMENT WHERE doctor_id = ? LIMIT 1",
+            (doctor_id,)
+        ).fetchone()
+
+        has_medications = connection.execute(
+            "SELECT 1 FROM MEDICATION WHERE prescribed_by = ? LIMIT 1",
+            (doctor_id,)
+        ).fetchone()
+
+        if has_appointments or has_medications:
+            return jsonify({
+                "error": "Cannot delete doctor with existing appointment or medication records. Please deactivate doctor instead."
+            }), 400
+
+        connection.execute(
+            "DELETE FROM DOCTOR WHERE doctor_id = ?",
+            (doctor_id,)
+        )
+        connection.commit()
+
+        return jsonify({
+            "message": "Doctor deleted successfully"
+        }), 200
+
+    except Exception:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
+
+
+# --------------------------------
+# TOGGLE / UPDATE DOCTOR STATUS
+# --------------------------------
+@doctor_bp.route("/<int:doctor_id>/status", methods=["PATCH"])
+def update_doctor_status(doctor_id):
+    data = request.get_json()
+
+    if not data:
+        return jsonify({
+            "error": "Request body is required"
+        }), 400
+
+    status = data.get("status")
+
+    if status not in {"Active", "Inactive"}:
+        return jsonify({
+            "error": "Status must be Active or Inactive"
+        }), 400
+
+    connection = get_db_connection()
+
+    try:
+        doctor = connection.execute(
+            "SELECT doctor_id FROM DOCTOR WHERE doctor_id = ?",
+            (doctor_id,)
+        ).fetchone()
+
+        if not doctor:
+            return jsonify({
+                "error": "Doctor not found"
+            }), 404
+
+        connection.execute(
+            "UPDATE DOCTOR SET status = ? WHERE doctor_id = ?",
+            (status, doctor_id)
+        )
+        connection.commit()
+
+        return jsonify({
+            "message": f"Doctor status updated to {status}",
+            "status": status
+        }), 200
+
+    except Exception:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
+
+
+# --------------------------------
+# DOCTOR DASHBOARD STATS
+# --------------------------------
+@doctor_bp.route("/<int:doctor_id>/dashboard-stats", methods=["GET"])
+def get_doctor_dashboard_stats(doctor_id):
+    connection = get_db_connection()
+
+    try:
+        doctor = connection.execute(
+            "SELECT doctor_id, name, specialization FROM DOCTOR WHERE doctor_id = ?",
+            (doctor_id,)
+        ).fetchone()
+
+        if not doctor:
+            return jsonify({
+                "error": "Doctor not found"
+            }), 404
+
+        # Today's appointments count
+        today_count = connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM APPOINTMENT
+            WHERE doctor_id = ?
+              AND appointment_date = DATE('now')
+              AND status <> 'Cancelled'
+            """,
+            (doctor_id,)
+        ).fetchone()["total"]
+
+        # Upcoming appointments count (future dates)
+        upcoming_count = connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM APPOINTMENT
+            WHERE doctor_id = ?
+              AND appointment_date >= DATE('now')
+              AND status NOT IN ('Completed', 'Cancelled')
+            """,
+            (doctor_id,)
+        ).fetchone()["total"]
+
+        # Total distinct patients
+        total_patients = connection.execute(
+            """
+            SELECT COUNT(DISTINCT patient_id) AS total
+            FROM APPOINTMENT
+            WHERE doctor_id = ?
+            """,
+            (doctor_id,)
+        ).fetchone()["total"]
+
+        # Completed appointments
+        completed_count = connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM APPOINTMENT
+            WHERE doctor_id = ?
+              AND status = 'Completed'
+            """,
+            (doctor_id,)
+        ).fetchone()["total"]
+
+        # Today's appointment list
+        today_appointments = connection.execute(
+            """
+            SELECT
+                a.appointment_id,
+                a.patient_id,
+                a.appointment_type,
+                a.appointment_date,
+                a.appointment_time,
+                a.status,
+                a.reason,
+                a.doctor_notes,
+                p.name AS patient_name,
+                p.phone AS patient_phone
+            FROM APPOINTMENT a
+            JOIN PATIENT p ON a.patient_id = p.patient_id
+            WHERE a.doctor_id = ?
+              AND a.appointment_date = DATE('now')
+            ORDER BY a.appointment_time ASC
+            """,
+            (doctor_id,)
+        ).fetchall()
+
+        # Upcoming appointment list (next 5)
+        upcoming_appointments = connection.execute(
+            """
+            SELECT
+                a.appointment_id,
+                a.patient_id,
+                a.appointment_type,
+                a.appointment_date,
+                a.appointment_time,
+                a.status,
+                a.reason,
+                a.doctor_notes,
+                p.name AS patient_name,
+                p.phone AS patient_phone
+            FROM APPOINTMENT a
+            JOIN PATIENT p ON a.patient_id = p.patient_id
+            WHERE a.doctor_id = ?
+              AND a.appointment_date >= DATE('now')
+              AND a.status <> 'Cancelled'
+            ORDER BY a.appointment_date ASC, a.appointment_time ASC
+            LIMIT 5
+            """,
+            (doctor_id,)
+        ).fetchall()
+
+        return jsonify({
+            "stats": {
+                "today_appointments": today_count,
+                "upcoming_appointments": upcoming_count,
+                "total_patients": total_patients,
+                "completed_appointments": completed_count
+            },
+            "today_appointments": [dict(r) for r in today_appointments],
+            "upcoming_appointments": [dict(r) for r in upcoming_appointments]
+        }), 200
+
+    finally:
+        connection.close()
+
+
+# --------------------------------
+# DOCTOR APPOINTMENTS
+# --------------------------------
+@doctor_bp.route("/<int:doctor_id>/appointments", methods=["GET"])
+def get_doctor_appointments(doctor_id):
+    connection = get_db_connection()
+
+    try:
+        appointments = connection.execute(
+            """
+            SELECT
+                a.appointment_id,
+                a.patient_id,
+                a.doctor_id,
+                a.booked_by,
+                a.appointment_type,
+                a.appointment_date,
+                a.appointment_time,
+                a.status,
+                a.reason,
+                a.doctor_notes,
+                p.name AS patient_name,
+                p.age AS patient_age,
+                p.gender AS patient_gender,
+                p.phone AS patient_phone,
+                p.relationship_type
+            FROM APPOINTMENT a
+            JOIN PATIENT p ON a.patient_id = p.patient_id
+            WHERE a.doctor_id = ?
+            ORDER BY a.appointment_date DESC, a.appointment_time DESC
+            """,
+            (doctor_id,)
+        ).fetchall()
+
+        return jsonify({
+            "appointments": [dict(a) for a in appointments]
+        }), 200
+
+    finally:
+        connection.close()
+
+
+# --------------------------------
+# UPDATE APPOINTMENT (STATUS / NOTES)
+# --------------------------------
+@doctor_bp.route("/<int:doctor_id>/appointments/<int:appointment_id>", methods=["PUT"])
+def update_doctor_appointment(doctor_id, appointment_id):
+    data = request.get_json()
+
+    if not data:
+        return jsonify({
+            "error": "Request body is required"
+        }), 400
+
+    status = data.get("status")
+    doctor_notes = data.get("doctor_notes")
+
+    if status and status not in {"Pending", "Confirmed", "Completed", "Cancelled"}:
+        return jsonify({
+            "error": "Invalid appointment status"
+        }), 400
+
+    connection = get_db_connection()
+
+    try:
+        appointment = connection.execute(
+            """
+            SELECT appointment_id
+            FROM APPOINTMENT
+            WHERE appointment_id = ? AND doctor_id = ?
+            """,
+            (appointment_id, doctor_id)
+        ).fetchone()
+
+        if not appointment:
+            return jsonify({
+                "error": "Appointment not found for this doctor"
+            }), 404
+
+        if status is not None and doctor_notes is not None:
+            connection.execute(
+                """
+                UPDATE APPOINTMENT
+                SET status = ?, doctor_notes = ?
+                WHERE appointment_id = ? AND doctor_id = ?
+                """,
+                (status, doctor_notes, appointment_id, doctor_id)
+            )
+        elif status is not None:
+            connection.execute(
+                """
+                UPDATE APPOINTMENT
+                SET status = ?
+                WHERE appointment_id = ? AND doctor_id = ?
+                """,
+                (status, appointment_id, doctor_id)
+            )
+        elif doctor_notes is not None:
+            connection.execute(
+                """
+                UPDATE APPOINTMENT
+                SET doctor_notes = ?
+                WHERE appointment_id = ? AND doctor_id = ?
+                """,
+                (doctor_notes, appointment_id, doctor_id)
+            )
+
+        connection.commit()
+
+        updated = connection.execute(
+            """
+            SELECT
+                a.appointment_id,
+                a.patient_id,
+                a.doctor_id,
+                a.appointment_type,
+                a.appointment_date,
+                a.appointment_time,
+                a.status,
+                a.reason,
+                a.doctor_notes,
+                p.name AS patient_name
+            FROM APPOINTMENT a
+            JOIN PATIENT p ON a.patient_id = p.patient_id
+            WHERE a.appointment_id = ?
+            """,
+            (appointment_id,)
+        ).fetchone()
+
+        return jsonify({
+            "message": "Appointment updated successfully",
+            "appointment": dict(updated)
+        }), 200
+
+    except Exception:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
+
+
+# --------------------------------
+# DOCTOR'S CONNECTED PATIENTS
+# --------------------------------
+@doctor_bp.route("/<int:doctor_id>/patients", methods=["GET"])
+def get_doctor_patients(doctor_id):
+    connection = get_db_connection()
+
+    try:
+        patients = connection.execute(
+            """
+            SELECT
+                p.patient_id,
+                p.name AS patient_name,
+                p.age,
+                p.gender,
+                p.phone,
+                p.address,
+                p.relationship_type,
+                MAX(a.appointment_date) AS last_appointment_date,
+                COUNT(a.appointment_id) AS total_appointments
+            FROM PATIENT p
+            JOIN APPOINTMENT a ON p.patient_id = a.patient_id
+            WHERE a.doctor_id = ?
+            GROUP BY p.patient_id
+            ORDER BY last_appointment_date DESC
+            """,
+            (doctor_id,)
+        ).fetchall()
+
+        return jsonify({
+            "patients": [dict(p) for p in patients]
+        }), 200
+
+    finally:
+        connection.close()
+
+
+# --------------------------------
+# DOCTOR'S CONNECTED PATIENT DETAIL
+# --------------------------------
+@doctor_bp.route("/<int:doctor_id>/patients/<int:patient_id>", methods=["GET"])
+def get_doctor_patient_detail(doctor_id, patient_id):
+    connection = get_db_connection()
+
+    try:
+        # Verify doctor is connected to this patient through at least one appointment
+        is_connected = connection.execute(
+            """
+            SELECT 1
+            FROM APPOINTMENT
+            WHERE doctor_id = ? AND patient_id = ?
+            LIMIT 1
+            """,
+            (doctor_id, patient_id)
+        ).fetchone()
+
+        if not is_connected:
+            return jsonify({
+                "error": "Access denied. Patient is not associated with this doctor."
+            }), 403
+
+        # Patient basic details
+        patient = connection.execute(
+            """
+            SELECT
+                patient_id,
+                name AS patient_name,
+                age,
+                gender,
+                phone,
+                address,
+                relationship_type
+            FROM PATIENT
+            WHERE patient_id = ?
+            """,
+            (patient_id,)
+        ).fetchone()
+
+        if not patient:
+            return jsonify({
+                "error": "Patient not found"
+            }), 404
+
+        # Active pregnancy info if any
+        pregnancy = connection.execute(
+            """
+            SELECT
+                pregnancy_id,
+                last_menstrual_date,
+                due_date,
+                pregnancy_status,
+                notes
+            FROM PREGNANCY
+            WHERE patient_id = ? AND pregnancy_status = 'Active'
+            """,
+            (patient_id,)
+        ).fetchone()
+
+        # Doctor's appointment history with this patient
+        appointments = connection.execute(
+            """
+            SELECT
+                appointment_id,
+                appointment_type,
+                appointment_date,
+                appointment_time,
+                status,
+                reason,
+                doctor_notes
+            FROM APPOINTMENT
+            WHERE doctor_id = ? AND patient_id = ?
+            ORDER BY appointment_date DESC, appointment_time DESC
+            """,
+            (doctor_id, patient_id)
+        ).fetchall()
+
+        # Health logs
+        health_logs = connection.execute(
+            """
+            SELECT
+                healthlog_id,
+                sleep_hours,
+                hydration,
+                weight,
+                nutrition_notes,
+                symptoms,
+                log_date
+            FROM HEALTHLOG
+            WHERE patient_id = ?
+            ORDER BY log_date DESC
+            LIMIT 10
+            """,
+            (patient_id,)
+        ).fetchall()
+
+        # Medications prescribed by this doctor or active
+        medications = connection.execute(
+            """
+            SELECT
+                medication_id,
+                medication_name,
+                dosage,
+                frequency,
+                instructions,
+                reason,
+                start_date,
+                end_date,
+                status
+            FROM MEDICATION
+            WHERE patient_id = ? AND prescribed_by = ?
+            ORDER BY medication_id DESC
+            """,
+            (patient_id, doctor_id)
+        ).fetchall()
+
+        return jsonify({
+            "patient": dict(patient),
+            "pregnancy": dict(pregnancy) if pregnancy else None,
+            "appointments": [dict(a) for a in appointments],
+            "health_logs": [dict(h) for h in health_logs],
+            "medications": [dict(m) for m in medications]
+        }), 200
+
+    finally:
+        connection.close()
+
 
