@@ -1,5 +1,6 @@
 /**
  * Password complexity validation helper.
+ *
  * Rules:
  * - At least 6 characters
  * - At least one uppercase letter (A-Z)
@@ -15,7 +16,11 @@ export function checkPasswordRequirements(password = "") {
   const hasSpecial = /[^A-Za-z0-9]/.test(password);
 
   const isValid =
-    minLength && hasUppercase && hasLowercase && hasNumber && hasSpecial;
+    minLength &&
+    hasUppercase &&
+    hasLowercase &&
+    hasNumber &&
+    hasSpecial;
 
   return {
     isValid,
@@ -34,53 +39,81 @@ export function checkPasswordRequirements(password = "") {
 
 /**
  * Validates registration ages based on Pregnify policy:
+ *
  * - Account Holder must be >= 18
  * - Patient must be >= 16
- * - If Self (Account Holder == Patient): Must be >= 18 (16-17 cannot self-register, <16 not supported)
+ * - If Self, Account Holder == Patient and must be >= 18
  */
-export function validateRegistrationAges(relationshipType, accountHolderAge, patientAge) {
+export function validateRegistrationAges(
+  relationshipType,
+  accountHolderAge,
+  patientAge
+) {
   const holderAgeNum = Number(accountHolderAge);
 
-  if (!accountHolderAge || isNaN(holderAgeNum)) {
+  // Account holder age missing/invalid
+  if (
+    accountHolderAge === "" ||
+    accountHolderAge === null ||
+    accountHolderAge === undefined ||
+    !Number.isFinite(holderAgeNum)
+  ) {
     return {
       isValid: false,
       error: "Please enter a valid age for the account holder.",
     };
   }
 
-  if (relationshipType === "Self") {
-    if (holderAgeNum < 16) {
-      return {
-        isValid: false,
-        error: "Pregnify is only available for patients aged 16 and above.",
-      };
-    }
-    if (holderAgeNum < 18) {
+  // Account holder cannot be below 18
+  if (holderAgeNum < 18) {
+    if (relationshipType === "Self") {
+      if (holderAgeNum < 16) {
+        return {
+          isValid: false,
+          error:
+            "Pregnify is only available for patients aged 16 and above.",
+        };
+      }
+
       return {
         isValid: false,
         error:
           "Patients aged 16–17 cannot create an account independently. An adult representative (18+) must create and manage the account.",
       };
     }
-    return { isValid: true, error: null };
-  }
 
-  // Representative Case
-  if (holderAgeNum < 18) {
     return {
       isValid: false,
-      error: "The account holder / representative must be at least 18 years old.",
+      error:
+        "The account holder / representative must be at least 18 years old.",
     };
   }
 
+  // Self registration is valid once account holder is 18+
+  if (relationshipType === "Self") {
+    return {
+      isValid: true,
+      error: null,
+    };
+  }
+
+  // Representative registration:
+  // Patient age is required.
   const patientAgeNum = Number(patientAge);
-  if (!patientAge || isNaN(patientAgeNum)) {
+
+  if (
+    patientAge === "" ||
+    patientAge === null ||
+    patientAge === undefined ||
+    !Number.isFinite(patientAgeNum)
+  ) {
     return {
       isValid: false,
       error: "Please enter a valid age for the patient.",
     };
   }
 
+  // Patient must be at least 16
   if (patientAgeNum < 16) {
     return {
       isValid: false,
@@ -89,5 +122,8 @@ export function validateRegistrationAges(relationshipType, accountHolderAge, pat
     };
   }
 
-  return { isValid: true, error: null };
+  return {
+    isValid: true,
+    error: null,
+  };
 }
