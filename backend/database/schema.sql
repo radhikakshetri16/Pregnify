@@ -67,6 +67,10 @@ CREATE TABLE IF NOT EXISTS DOCTOR (
     password TEXT NOT NULL,
     phone TEXT,
     specialization TEXT NOT NULL,
+    nmc_number TEXT NOT NULL UNIQUE,
+    experience INTEGER NOT NULL,
+    practice_at TEXT NOT NULL,
+    consultation_fee REAL NOT NULL,
     status TEXT NOT NULL DEFAULT 'Active'
         CHECK (status IN ('Active', 'Inactive')),
     must_change_password INTEGER NOT NULL DEFAULT 1

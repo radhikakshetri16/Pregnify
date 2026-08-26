@@ -4,6 +4,11 @@ import Sidebar from "./components/Sidebar";
 
 import Register from "./pages/Register";
 import Login from "./pages/Login";
+
+import DoctorLogin from "./pages/DoctorLogin";
+import DoctorChangePassword from "./pages/DoctorChangePassword";
+import DoctorDashboard from "./pages/DoctorDashboard";
+
 import Dashboard from "./pages/Dashboard";
 import Pregnancy from "./pages/Pregnancy";
 import Appointments from "./pages/Appointments";
@@ -12,6 +17,7 @@ import Reports from "./pages/Reports";
 import Medicalhistory from "./pages/Medicalhistory";
 import Settings from "./pages/Settings";
 import Health from "./pages/Health";
+
 
 function AppLayout() {
   const user = localStorage.getItem("user");
@@ -29,7 +35,10 @@ function AppLayout() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
 
-          <Route path="/pregnancy" element={<Pregnancy />} />
+          <Route
+            path="/pregnancy"
+            element={<Pregnancy />}
+          />
 
           <Route
             path="/appointments"
@@ -66,21 +75,60 @@ function AppLayout() {
   );
 }
 
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
 
-        {/* Public pages */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+        {/* =========================
+            USER PUBLIC PAGES
+           ========================= */}
 
-        {/* Dashboard/application */}
-        <Route path="/*" element={<AppLayout />} />
+        <Route
+          path="/login"
+          element={<Login />}
+        />
+
+        <Route
+          path="/register"
+          element={<Register />}
+        />
+
+
+        {/* =========================
+            DOCTOR PUBLIC PAGES
+           ========================= */}
+
+        <Route
+          path="/doctor/login"
+          element={<DoctorLogin />}
+        />
+
+        <Route
+          path="/doctor/change-password"
+          element={<DoctorChangePassword />}
+        />
+
+        <Route 
+         path="/doctor/dashboard"
+         element={<DoctorDashboard />}
+        />
+
+
+        {/* =========================
+            USER APPLICATION
+           ========================= */}
+
+        <Route
+          path="/*"
+          element={<AppLayout />}
+        />
 
       </Routes>
     </BrowserRouter>
   );
 }
+
 
 export default App;
