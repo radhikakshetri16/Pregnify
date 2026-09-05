@@ -1,13 +1,16 @@
 /**
- * Password complexity validation helper.
+ * =========================================================
+ * PASSWORD VALIDATION
+ * =========================================================
  *
- * Rules:
+ * Password requirements:
  * - At least 6 characters
  * - At least one uppercase letter (A-Z)
  * - At least one lowercase letter (a-z)
  * - At least one number (0-9)
  * - At least one special character
  */
+
 export function checkPasswordRequirements(password = "") {
   const minLength = password.length >= 6;
   const hasUppercase = /[A-Z]/.test(password);
@@ -24,6 +27,7 @@ export function checkPasswordRequirements(password = "") {
 
   return {
     isValid,
+
     rules: {
       minLength,
       hasUppercase,
@@ -31,27 +35,52 @@ export function checkPasswordRequirements(password = "") {
       hasNumber,
       hasSpecial,
     },
+
     errorMessage: !isValid
       ? "Password must be at least 6 characters long and include at least one uppercase letter, one lowercase letter, one number, and one special character."
       : "",
   };
 }
 
+
 /**
- * Validates registration ages based on Pregnify policy:
+ * =========================================================
+ * REGISTRATION AGE VALIDATION
+ * =========================================================
  *
- * - Account Holder must be >= 18
- * - Patient must be >= 16
- * - If Self, Account Holder == Patient and must be >= 18
+ * Pregnify age policy:
+ *
+ * SELF:
+ * - Account holder is the patient.
+ * - Patient must be at least 20 years old.
+ *
+ * REPRESENTATIVE:
+ * - Account holder / representative must be at least 18.
+ * - Patient must be at least 20.
+ *
+ * Relationship types:
+ * - Self
+ * - Husband
+ * - Caretaker
+ * - Guardian
+ * - Other
  */
+
 export function validateRegistrationAges(
   relationshipType,
   accountHolderAge,
   patientAge
 ) {
+  // -------------------------------------------------------
+  // Convert account holder age to number
+  // -------------------------------------------------------
+
   const holderAgeNum = Number(accountHolderAge);
 
-  // Account holder age missing/invalid
+  // -------------------------------------------------------
+  // Account holder age is required
+  // -------------------------------------------------------
+
   if (
     accountHolderAge === "" ||
     accountHolderAge === null ||
@@ -64,24 +93,37 @@ export function validateRegistrationAges(
     };
   }
 
-  // Account holder cannot be below 18
-  if (holderAgeNum < 18) {
-    if (relationshipType === "Self") {
-      if (holderAgeNum < 16) {
-        return {
-          isValid: false,
-          error:
-            "Pregnify is only available for patients aged 16 and above.",
-        };
-      }
+  // -------------------------------------------------------
+  // SELF
+  //
+  // The account holder is also the patient.
+  // Therefore, the person must be at least 20.
+  // -------------------------------------------------------
 
+  if (relationshipType === "Self") {
+    if (holderAgeNum < 20) {
       return {
         isValid: false,
         error:
-          "Patients aged 16–17 cannot create an account independently. An adult representative (18+) must create and manage the account.",
+          "Patients registering themselves must be at least 20 years old.",
       };
     }
 
+    return {
+      isValid: true,
+      error: null,
+    };
+  }
+
+  // -------------------------------------------------------
+  // REPRESENTATIVE
+  //
+  // Husband / Caretaker / Guardian / Other
+  //
+  // The person managing the account must be 18+.
+  // -------------------------------------------------------
+
+  if (holderAgeNum < 18) {
     return {
       isValid: false,
       error:
@@ -89,16 +131,10 @@ export function validateRegistrationAges(
     };
   }
 
-  // Self registration is valid once account holder is 18+
-  if (relationshipType === "Self") {
-    return {
-      isValid: true,
-      error: null,
-    };
-  }
+  // -------------------------------------------------------
+  // Patient age is required
+  // -------------------------------------------------------
 
-  // Representative registration:
-  // Patient age is required.
   const patientAgeNum = Number(patientAge);
 
   if (
@@ -113,12 +149,55 @@ export function validateRegistrationAges(
     };
   }
 
-  // Patient must be at least 16
-  if (patientAgeNum < 16) {
+  // -------------------------------------------------------
+  // Patient must be at least 20
+  // -------------------------------------------------------
+
+  if (patientAgeNum < 20) {
+    return {
+      isValid: false,
+      error: "The patient must be at least 20 years old.",
+    };
+  }
+
+  // -------------------------------------------------------
+  // Valid
+  // -------------------------------------------------------
+
+  return {
+    isValid: true,
+    error: null,
+  };
+}
+
+
+/**
+ * =========================================================
+ * PATIENT GENDER VALIDATION
+ * =========================================================
+ *
+ * Pregnify is a pregnancy-care system.
+ *
+ * Therefore:
+ * - Patient must be Female.
+ *
+ * This is separate from account-holder gender because a
+ * representative may be male or female.
+ */
+
+export function validatePatientGender(patientGender) {
+  if (!patientGender) {
+    return {
+      isValid: false,
+      error: "Please select the patient's gender.",
+    };
+  }
+
+  if (patientGender !== "Female") {
     return {
       isValid: false,
       error:
-        "Patient must be at least 16 years old. Pregnify does not support registrations for patients below 16.",
+        "The patient must be female because Pregnify is designed for pregnancy care.",
     };
   }
 
