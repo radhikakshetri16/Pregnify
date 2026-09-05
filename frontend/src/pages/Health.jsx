@@ -134,34 +134,34 @@ function Health() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-4xl mx-auto space-y-8">
 
       {/* Header */}
-      <div className="mb-8">
+      <div>
         <h1 className="text-3xl font-bold text-gray-800">
-          Health History
+          Health Logs
         </h1>
 
         <p className="text-gray-500 mt-2">
-          Record how you are doing during your pregnancy.
+          Track your daily health records throughout your pregnancy.
         </p>
       </div>
 
-      {/* Add health log */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-7 mb-8">
+      {/* Add log form */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-7">
 
         <div className="flex items-center gap-3 mb-6">
           <div className="p-3 bg-pink-50 rounded-xl">
-            <Activity className="text-pink-600" size={24} />
+            <Activity className="text-pink-600" size={22} />
           </div>
 
           <div>
             <h2 className="text-xl font-semibold text-gray-800">
-              Add Health Log
+              Add Today's Health Log
             </h2>
 
             <p className="text-sm text-gray-500">
-              Record your health information whenever appropriate.
+              Record weight, sleep, hydration, and symptoms.
             </p>
           </div>
         </div>
@@ -173,7 +173,7 @@ function Health() {
             {/* Weight */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Weight
+                Weight (kg)
               </label>
 
               <div className="relative">
@@ -306,7 +306,7 @@ function Health() {
             className="flex items-center justify-center gap-2 w-full
                        bg-pink-600 text-white py-3 rounded-lg
                        font-medium hover:bg-pink-700
-                       disabled:opacity-50"
+                       disabled:opacity-50 transition"
           >
             <Plus size={18} />
 
@@ -347,7 +347,7 @@ function Health() {
             {logs.map((log) => (
               <div
                 key={log.healthlog_id}
-                className="border border-gray-100 rounded-xl p-5 hover:bg-gray-50"
+                className="border border-gray-100 rounded-xl p-5 hover:bg-gray-50 transition"
               >
 
                 <div className="flex justify-between items-start mb-4">
