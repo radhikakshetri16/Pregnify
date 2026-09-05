@@ -1,113 +1,168 @@
-from flask import Blueprint, request, jsonify
 from datetime import datetime
+from flask import Blueprint, request, jsonify
+
 from database.db import get_db_connection
 
-health_bp = Blueprint("health", __name__, url_prefix="/api/health")
+
+health_bp = Blueprint(
+    "health",
+    __name__,
+    url_prefix="/api/health"
+)
 
 
-@health_bp.route("/logs", methods=["GET"])
+def get_patient_id(connection, user_id):
+    patient = connection.execute(
+        """
+        SELECT patient_id
+        FROM PATIENT
+        WHERE user_id = ?
+        """,
+        (user_id,)
+    ).fetchone()
+
+    if not patient:
+        return None
+
+    return patient["patient_id"]
+
+
+@health_bp.route("", methods=["GET"])
 def get_health_logs():
-    user_id = request.args.get("userId")
+    user_id = request.args.get("user_id", type=int)
+
     if not user_id:
-        return jsonify({"error": "userId is required"}), 400
+        return jsonify({
+            "error": "user_id is required"
+        }), 400
 
     connection = get_db_connection()
+
     try:
+        patient_id = get_patient_id(connection, user_id)
+
+        if not patient_id:
+            return jsonify({
+                "error": "Patient record not found"
+            }), 404
+
         logs = connection.execute(
             """
-            SELECT * FROM health_logs
-            WHERE clerk_user_id = ?
-            ORDER BY log_date DESC, created_at DESC
+            SELECT
+                healthlog_id,
+                pregnancy_id,
+                sleep_hours,
+                hydration,
+                weight,
+                nutrition_notes,
+                symptoms,
+                log_date
+            FROM HEALTHLOG
+            WHERE patient_id = ?
+            ORDER BY log_date DESC
             """,
-            (user_id,)
+            (patient_id,)
         ).fetchall()
 
-        logs_list = []
-        for row in logs:
-            logs_list.append({
-                "id": str(row["id"]),
-                "userId": row["clerk_user_id"],
-                "weight": row["weight"],
-                "bloodPressure": row["blood_pressure"],
-                "heartRate": row["heart_rate"],
-                "symptoms": row["symptoms"],
-                "notes": row["notes"],
-                "date": row["log_date"],
-                "createdAt": row["created_at"]
-            })
-
-        return jsonify({"logs": logs_list}), 200
+        return jsonify({
+            "health_logs": [
+                {
+                    "healthlog_id": log["healthlog_id"],
+                    "pregnancy_id": log["pregnancy_id"],
+                    "sleep_hours": log["sleep_hours"],
+                    "hydration": log["hydration"],
+                    "weight": log["weight"],
+                    "nutrition_notes": log["nutrition_notes"],
+                    "symptoms": log["symptoms"],
+                    "log_date": log["log_date"]
+                }
+                for log in logs
+            ]
+        }), 200
 
     finally:
         connection.close()
 
 
-@health_bp.route("/logs", methods=["POST"])
-def add_health_log():
+@health_bp.route("", methods=["POST"])
+def create_health_log():
     data = request.get_json()
+
     if not data:
-        return jsonify({"error": "Request JSON body is required"}), 400
+        return jsonify({
+            "error": "Request body is required"
+        }), 400
 
-    user_id = data.get("userId") or data.get("clerkUserId")
+    user_id = data.get("user_id")
+
     if not user_id:
-        return jsonify({"error": "userId is required"}), 400
-
-    weight = data.get("weight")
-    blood_pressure = data.get("bloodPressure")
-    heart_rate = data.get("heartRate")
-    symptoms = data.get("symptoms", "")
-    notes = data.get("notes", "")
-    log_date = data.get("date") or datetime.now().strftime("%Y-%m-%d")
+        return jsonify({
+            "error": "user_id is required"
+        }), 400
 
     connection = get_db_connection()
+
     try:
-        # Insert log
+        patient_id = get_patient_id(connection, user_id)
+
+        if not patient_id:
+            return jsonify({
+                "error": "Patient record not found"
+            }), 404
+
+        pregnancy = connection.execute(
+            """
+            SELECT pregnancy_id
+            FROM PREGNANCY
+            WHERE patient_id = ?
+            AND pregnancy_status = 'Active'
+            """,
+            (patient_id,)
+        ).fetchone()
+
+        if not pregnancy:
+            return jsonify({
+                "error": "No active pregnancy found"
+            }), 400
+
+        pregnancy_id = pregnancy["pregnancy_id"]
+
+        log_date = data.get("log_date")
+
+        if not log_date:
+            log_date = datetime.now().isoformat(timespec="seconds")
+
         cursor = connection.execute(
             """
-            INSERT INTO health_logs (clerk_user_id, weight, blood_pressure, heart_rate, symptoms, notes, log_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (user_id, weight, blood_pressure, heart_rate, symptoms, notes, log_date)
-        )
-
-        # Update current user record with latest vitals if supplied
-        update_fields = []
-        params = []
-        if weight:
-            update_fields.append("weight = ?")
-            params.append(weight)
-        if blood_pressure:
-            update_fields.append("blood_pressure = ?")
-            params.append(blood_pressure)
-        if heart_rate:
-            update_fields.append("heart_rate = ?")
-            params.append(heart_rate)
-
-        if update_fields:
-            params.append(user_id)
-            connection.execute(
-                f"""
-                UPDATE users
-                SET {', '.join(update_fields)}, updated_at = CURRENT_TIMESTAMP
-                WHERE clerk_user_id = ?
-                """,
-                tuple(params)
+            INSERT INTO HEALTHLOG (
+                patient_id,
+                pregnancy_id,
+                sleep_hours,
+                hydration,
+                weight,
+                nutrition_notes,
+                symptoms,
+                log_date
             )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                patient_id,
+                pregnancy_id,
+                data.get("sleep_hours"),
+                data.get("hydration"),
+                data.get("weight"),
+                data.get("nutrition_notes"),
+                data.get("symptoms"),
+                log_date
+            )
+        )
 
         connection.commit()
 
         return jsonify({
-            "message": "Health log saved successfully",
-            "log": {
-                "id": str(cursor.lastrowid),
-                "userId": user_id,
-                "weight": weight,
-                "bloodPressure": blood_pressure,
-                "heartRate": heart_rate,
-                "symptoms": symptoms,
-                "notes": notes,
-                "date": log_date
-            }
+            "message": "Health log created successfully",
+            "healthlog_id": cursor.lastrowid
         }), 201
 
     finally:

@@ -1,236 +1,331 @@
-import { useAuth } from "../context/AuthContext";
-import { usePregnancy } from "../context/PregnancyContext";
-import { Link } from "react-router-dom";
-import { CalendarDays, HeartPulse, Baby, Clock, Activity, Scale, Droplet } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  HeartPulse,
+  CalendarDays,
+  Activity,
+  Weight,
+  Clock,
+} from "lucide-react";
 
 function Dashboard() {
-  const { user } = useAuth();
-  const { profile, gestationalInfo, bmi } = usePregnancy();
+  const user = JSON.parse(localStorage.getItem("user"));
 
-  const userName = user?.firstName || user?.fullName || "User";
+  const [pregnancy, setPregnancy] = useState(null);
+  const [healthLogs, setHealthLogs] = useState([]);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const fetchDashboardData = async () => {
+    if (!user?.id) {
+      setError("You must be logged in.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const [pregnancyResponse, healthResponse] =
+        await Promise.all([
+          fetch(
+            `http://127.0.0.1:5000/api/pregnancy?user_id=${user.id}`
+          ),
+
+          fetch(
+            `http://127.0.0.1:5000/api/health?user_id=${user.id}`
+          ),
+        ]);
+
+      const pregnancyData = await pregnancyResponse.json();
+      const healthData = await healthResponse.json();
+
+      if (!pregnancyResponse.ok) {
+        setError(
+          pregnancyData.error ||
+            "Unable to load pregnancy information."
+        );
+        return;
+      }
+
+      if (!healthResponse.ok) {
+        setError(
+          healthData.error ||
+            "Unable to load health information."
+        );
+        return;
+      }
+
+      setPregnancy(pregnancyData.pregnancy);
+      setHealthLogs(healthData.health_logs || []);
+
+    } catch (err) {
+      console.error(err);
+      setError("Unable to connect to the server.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <p className="text-gray-500">
+          Loading dashboard...
+        </p>
+      </div>
+    );
+  }
+
+  const latestHealthLog =
+    healthLogs.length > 0
+      ? healthLogs[0]
+      : null;
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-6xl mx-auto">
+
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-xl border border-zinc-200">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-900">
-            Welcome back, {userName}
-          </h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            Current status: {gestationalInfo.trimester} ({gestationalInfo.weeks} weeks and {gestationalInfo.days} days).
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-800">
+          Welcome, {user?.name || "User"}
+        </h1>
+
+        <p className="text-gray-500 mt-2">
+          Here's a simple overview of your pregnancy.
+        </p>
+      </div>
+
+      {error && (
+        <div className="mb-6 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg">
+          {error}
+        </div>
+      )}
+
+      {!pregnancy ? (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10 text-center">
+
+          <HeartPulse
+            size={48}
+            className="mx-auto text-pink-400 mb-4"
+          />
+
+          <h2 className="text-xl font-semibold text-gray-800">
+            Pregnancy information not added yet
+          </h2>
+
+          <p className="text-gray-500 mt-2">
+            Add your pregnancy information to see your
+            pregnancy overview here.
           </p>
-        </div>
 
-        <div className="flex items-center gap-3">
-          <Link
-            to="/info"
-            className="px-4 py-2 text-xs font-medium text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg transition"
-          >
-            Edit Profile & Vitals
-          </Link>
-          <Link
-            to="/health"
-            className="px-4 py-2 text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg transition"
-          >
-            Log Health
-          </Link>
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Pregnancy cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Pregnancy Week */}
-        <div className="bg-white rounded-xl p-5 border border-zinc-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                Gestational Age
-              </p>
-              <h2 className="text-2xl font-bold text-zinc-900 mt-2">
-                {gestationalInfo.weeks} Weeks {gestationalInfo.days > 0 ? `${gestationalInfo.days} Days` : ""}
-              </h2>
-              <p className="text-xs text-zinc-500 mt-1">
-                {gestationalInfo.totalDays} days elapsed
-              </p>
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center gap-4">
+
+                <div className="p-3 bg-pink-50 rounded-xl">
+                  <HeartPulse
+                    className="text-pink-600"
+                    size={23}
+                  />
+                </div>
+
+                <div>
+                  <p className="text-sm text-gray-500">
+                    Pregnancy Week
+                  </p>
+
+                  <p className="text-2xl font-bold text-gray-800">
+                    Week {pregnancy.pregnancy_week}
+                  </p>
+                </div>
+
+              </div>
             </div>
-            <div className="w-10 h-10 rounded-lg bg-zinc-100 flex items-center justify-center text-zinc-700">
-              <Baby size={20} />
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center gap-4">
+
+                <div className="p-3 bg-purple-50 rounded-xl">
+                  <Activity
+                    className="text-purple-600"
+                    size={23}
+                  />
+                </div>
+
+                <div>
+                  <p className="text-sm text-gray-500">
+                    Trimester
+                  </p>
+
+                  <p className="text-lg font-bold text-gray-800">
+                    {pregnancy.trimester}
+                  </p>
+                </div>
+
+              </div>
             </div>
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center gap-4">
+
+                <div className="p-3 bg-green-50 rounded-xl">
+                  <Clock
+                    className="text-green-600"
+                    size={23}
+                  />
+                </div>
+
+                <div>
+                  <p className="text-sm text-gray-500">
+                    Pregnancy Progress
+                  </p>
+
+                  <p className="text-2xl font-bold text-gray-800">
+                    {pregnancy.progress_percentage}%
+                  </p>
+                </div>
+
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center gap-4">
+
+                <div className="p-3 bg-blue-50 rounded-xl">
+                  <CalendarDays
+                    className="text-blue-600"
+                    size={23}
+                  />
+                </div>
+
+                <div>
+                  <p className="text-sm text-gray-500">
+                    Expected Due Date
+                  </p>
+
+                  <p className="text-lg font-bold text-gray-800">
+                    {pregnancy.due_date}
+                  </p>
+                </div>
+
+              </div>
+            </div>
+
           </div>
-        </div>
 
-        {/* Expected Due Date */}
-        <div className="bg-white rounded-xl p-5 border border-zinc-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                Expected Due Date
-              </p>
-              <h2 className="text-2xl font-bold text-zinc-900 mt-2">
-                {gestationalInfo.dueDateFormatted}
+          {/* Progress */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-7 mt-6">
+
+            <div className="flex justify-between mb-3">
+
+              <h2 className="font-semibold text-gray-800">
+                Pregnancy Progress
               </h2>
-              <p className="text-xs text-zinc-500 mt-1">
-                {gestationalInfo.daysRemaining > 0
-                  ? `${gestationalInfo.daysRemaining} days remaining`
-                  : "Estimated date reached"}
-              </p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-zinc-100 flex items-center justify-center text-zinc-700">
-              <CalendarDays size={20} />
-            </div>
-          </div>
-        </div>
 
-        {/* Trimester */}
-        <div className="bg-white rounded-xl p-5 border border-zinc-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                Current Trimester
-              </p>
-              <h2 className="text-2xl font-bold text-zinc-900 mt-2">
-                {gestationalInfo.trimester}
-              </h2>
-              <p className="text-xs text-zinc-500 mt-1">
-                Type: {profile.pregnancyType || "Single"}
-              </p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-zinc-100 flex items-center justify-center text-zinc-700">
-              <HeartPulse size={20} />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Progress and Appointment Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Progress Card */}
-        <div className="bg-white rounded-xl p-5 border border-zinc-200 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-sm text-zinc-900">Pregnancy Progress</h3>
-              <span className="text-xs font-semibold text-zinc-700">
-                {gestationalInfo.progressPercent}%
+              <span className="text-sm text-gray-500">
+                {pregnancy.progress_percentage}%
               </span>
-            </div>
-            <p className="text-xs text-zinc-500 mt-1">
-              Calculated from LMP date ({profile.lmpDate || "Not set"}).
-            </p>
-          </div>
 
-          <div className="my-5">
-            <div className="w-full h-2.5 bg-zinc-100 rounded-full overflow-hidden">
+            </div>
+
+            <div className="w-full bg-gray-100 rounded-full h-3">
+
               <div
-                className="h-full bg-zinc-900 rounded-full transition-all duration-300"
-                style={{ width: `${gestationalInfo.progressPercent}%` }}
+                className="bg-pink-500 h-3 rounded-full transition-all"
+                style={{
+                  width: `${pregnancy.progress_percentage}%`,
+                }}
               />
+
             </div>
-            <div className="flex justify-between text-xs text-zinc-400 mt-2 font-medium">
-              <span>Week 1</span>
-              <span>Week 20</span>
-              <span>Week 40</span>
+
+          </div>
+
+          {/* Health summary */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-7">
+
+              <div className="flex items-center gap-3 mb-5">
+
+                <div className="p-3 bg-orange-50 rounded-xl">
+                  <Weight
+                    className="text-orange-600"
+                    size={22}
+                  />
+                </div>
+
+                <div>
+                  <h2 className="font-semibold text-gray-800">
+                    Latest Health
+                  </h2>
+
+                  <p className="text-sm text-gray-500">
+                    Most recently recorded weight
+                  </p>
+                </div>
+
+              </div>
+
+              {latestHealthLog ? (
+                <div>
+                  <p className="text-3xl font-bold text-gray-800">
+                    {latestHealthLog.weight ?? "—"}
+                  </p>
+
+                  <p className="text-sm text-gray-500 mt-1">
+                    Latest recorded weight
+                  </p>
+                </div>
+              ) : (
+                <p className="text-gray-500">
+                  No health information recorded yet.
+                </p>
+              )}
+
             </div>
-          </div>
 
-          <div className="pt-3 border-t border-zinc-100 flex items-center justify-between text-xs text-zinc-500">
-            <span>Blood Group: <strong className="text-zinc-800">{profile.bloodGroup || "O+"}</strong></span>
-            <span>Height: <strong className="text-zinc-800">{profile.height ? `${profile.height} cm` : "Not set"}</strong></span>
-          </div>
-        </div>
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-7">
 
-        {/* Appointment Card */}
-        <div className="bg-white rounded-xl p-5 border border-zinc-200 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-sm text-zinc-900">Next Appointment</h3>
-              <Clock size={16} className="text-zinc-400" />
+              <div className="flex items-center gap-3 mb-5">
+
+                <div className="p-3 bg-blue-50 rounded-xl">
+                  <CalendarDays
+                    className="text-blue-600"
+                    size={22}
+                  />
+                </div>
+
+                <div>
+                  <h2 className="font-semibold text-gray-800">
+                    Next Appointment
+                  </h2>
+
+                  <p className="text-sm text-gray-500">
+                    Your upcoming appointment
+                  </p>
+                </div>
+
+              </div>
+
+              <p className="text-gray-500">
+                No upcoming appointment available.
+              </p>
+
             </div>
-            <p className="text-xs text-zinc-500 mt-1">
-              Scheduled clinical consultation.
-            </p>
+
           </div>
+        </>
+      )}
 
-          <div className="my-4 p-4 rounded-lg bg-zinc-50 border border-zinc-100">
-            <h4 className="font-semibold text-zinc-900 text-base">
-              {profile.appointmentDate || "No date scheduled"}
-            </h4>
-            <p className="text-xs text-zinc-600 mt-0.5">
-              {profile.appointmentTime || "10:00 AM"} · {profile.doctorName || "Dr. Sharma"}
-            </p>
-            <p className="text-xs text-zinc-500 mt-1">
-              {profile.appointmentType || "Regular ANC Checkup"}
-            </p>
-          </div>
-
-          <Link
-            to="/appointments"
-            className="w-full text-center py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-lg text-xs font-medium transition"
-          >
-            Manage Appointments
-          </Link>
-        </div>
-      </div>
-
-      {/* Vitals Overview */}
-      <div className="bg-white rounded-xl p-6 border border-zinc-200">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-sm text-zinc-900">Latest Recorded Vitals</h3>
-          <Link to="/health" className="text-xs font-medium text-zinc-600 hover:text-zinc-900">
-            View Health Logs
-          </Link>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="p-4 rounded-lg bg-zinc-50 border border-zinc-100">
-            <div className="flex items-center justify-between text-xs text-zinc-500">
-              <span>Weight</span>
-              <Scale size={16} />
-            </div>
-            <p className="text-xl font-bold text-zinc-900 mt-1.5">
-              {profile.weight ? `${profile.weight} kg` : "--"}
-            </p>
-          </div>
-
-          <div className="p-4 rounded-lg bg-zinc-50 border border-zinc-100">
-            <div className="flex items-center justify-between text-xs text-zinc-500">
-              <span>Blood Pressure</span>
-              <HeartPulse size={16} />
-            </div>
-            <p className="text-xl font-bold text-zinc-900 mt-1.5">
-              {profile.bloodPressure || "--"}
-            </p>
-            <span className="text-[11px] text-zinc-400">mmHg</span>
-          </div>
-
-          <div className="p-4 rounded-lg bg-zinc-50 border border-zinc-100">
-            <div className="flex items-center justify-between text-xs text-zinc-500">
-              <span>Heart Rate</span>
-              <Activity size={16} />
-            </div>
-            <p className="text-xl font-bold text-zinc-900 mt-1.5">
-              {profile.heartRate ? `${profile.heartRate} bpm` : "--"}
-            </p>
-          </div>
-
-          <div className="p-4 rounded-lg bg-zinc-50 border border-zinc-100">
-            <div className="flex items-center justify-between text-xs text-zinc-500">
-              <span>Body Mass Index</span>
-              <Droplet size={16} />
-            </div>
-            <p className="text-xl font-bold text-zinc-900 mt-1.5">
-              {bmi || "--"}
-            </p>
-            <span className="text-[11px] text-zinc-400">BMI</span>
-          </div>
-        </div>
-
-        {profile.symptoms && (
-          <div className="mt-4 p-3 rounded-lg bg-zinc-50 border border-zinc-100 text-xs text-zinc-700">
-            <strong className="text-zinc-900">Logged Symptoms:</strong> {profile.symptoms} {profile.notes && `· ${profile.notes}`}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
