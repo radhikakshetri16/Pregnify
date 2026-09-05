@@ -1,15 +1,10 @@
-function Medicines() {
-  return (
-    <div>
-      <h1 className="text-3xl font-bold text-gray-800">
-        Medicines
-      </h1>
-
-      <p className="mt-2 text-gray-500">
-        Manage your medication reminders.
-      </p>
-    </div>
-  );
-}
-
+import { useEffect, useState } from "react";
+import { Pill, Plus, ShieldAlert } from "lucide-react";
+import { Empty, Input, Select, Text } from "./Appointments";
+const blank = { medicine_name: "", purpose: "", dosage: "", frequency: "Once daily", take_time: "", start_date: "", end_date: "", prescribed_by: "", instructions: "", reminder_enabled: false, status: "Active", notes: "" };
+function Medicines() { const user = JSON.parse(localStorage.getItem("user")); const [medicines, setMedicines] = useState([]), [form, setForm] = useState(blank), [open, setOpen] = useState(false), [error, setError] = useState("");
+ const load = async () => { try { const r = await fetch(`http://127.0.0.1:5000/api/medicines?user_id=${user.id}`), d = await r.json(); if(!r.ok) throw new Error(d.error); setMedicines(d.medicines); } catch(e) { setError(e.message); }}; useEffect(()=>{if(user?.id)load()},[]); const change=e=>setForm({...form,[e.target.name]:e.target.type === "checkbox" ? e.target.checked:e.target.value}); const submit=async e=>{e.preventDefault(); const r=await fetch("http://127.0.0.1:5000/api/medicines",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...form,user_id:user.id})}), d=await r.json(); if(!r.ok){setError(d.error);return} setForm(blank);setOpen(false);load()};
+ return <div className="max-w-6xl mx-auto"><div className="flex flex-wrap justify-between gap-4 mb-8"><div><h1 className="text-3xl font-bold text-gray-800">Medicines</h1><p className="mt-2 text-gray-500">Track medicines exactly as prescribed by your clinician.</p></div><button onClick={()=>setOpen(!open)} className="flex items-center gap-2 bg-pink-600 text-white px-5 py-3 rounded-lg"><Plus size={18}/>Add medicine</button></div><div className="mb-6 flex gap-2 bg-amber-50 text-amber-800 p-4 rounded-xl text-sm"><ShieldAlert size={18} className="shrink-0"/>Pregnify records your prescription; it does not recommend or change medication doses.</div>
+ {open&&<form onSubmit={submit} className="bg-white rounded-2xl border p-6 mb-6 grid md:grid-cols-2 gap-4"><Input label="Medicine name" name="medicine_name" form={form} change={change} required/><Input label="Purpose / reason" name="purpose" form={form} change={change}/><Input label="Dosage" name="dosage" form={form} change={change}/><Select label="Frequency" name="frequency" options={["Once daily","Twice daily","Three times daily","As needed","Other"]} form={form} change={change}/><Input label="Time to take" name="take_time" type="time" form={form} change={change}/><Input label="Prescribed by" name="prescribed_by" form={form} change={change}/><Input label="Start date" name="start_date" type="date" form={form} change={change}/><Input label="End date" name="end_date" type="date" form={form} change={change}/><Text label="Instructions" name="instructions" form={form} change={change}/><Text label="Notes" name="notes" form={form} change={change}/><Select label="Status" name="status" options={["Active","Completed","Discontinued"]} form={form} change={change}/><label className="flex items-center gap-2 text-sm"><input type="checkbox" name="reminder_enabled" checked={form.reminder_enabled} onChange={change}/>Reminder ON</label><button className="md:col-span-2 bg-pink-600 text-white py-3 rounded-lg">Save medicine</button></form>}{error&&<p className="text-red-600 mb-4">{error}</p>}
+ <section><h2 className="font-semibold text-xl text-gray-800 mb-4">Today’s medicines</h2>{medicines.length===0?<Empty icon={<Pill className="mx-auto"/>} text="No medicines added yet."/>:<div className="space-y-3">{medicines.map(m=><div key={m.medicine_id} className="bg-white border rounded-xl p-5 flex justify-between gap-4"><div><p className="font-semibold">{m.take_time || "Time not set"} — {m.medicine_name}</p><p className="text-sm text-gray-500 mt-1">{m.dosage} {m.frequency && `· ${m.frequency}`} · {m.purpose || "Purpose not added"}</p>{m.instructions&&<p className="text-sm mt-2 text-gray-600">{m.instructions}</p>}</div><span className={`text-sm h-fit px-2 py-1 rounded-full ${m.status==="Active"?"bg-green-100 text-green-700":"bg-gray-100 text-gray-600"}`}>{m.status}</span></div>)}</div>}</section></div> }
 export default Medicines;

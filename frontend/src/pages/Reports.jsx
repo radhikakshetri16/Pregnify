@@ -1,15 +1,12 @@
-function Reports() {
-  return (
-    <div>
-      <h1 className="text-3xl font-bold text-gray-800">
-        Medical Reports
-      </h1>
-
-      <p className="mt-2 text-gray-500">
-        View and upload your medical reports.
-      </p>
-    </div>
-  );
-}
-
+import { useEffect, useState } from "react";
+import { FileText, Plus, Upload } from "lucide-react";
+import { Empty } from "./Appointments";
+const categories = ["Ultrasound", "Blood test", "Urine test", "Genetic screening", "Glucose test", "Blood pressure records", "Prescription", "Doctor’s report", "Vaccination record", "Other"];
+const initial = { report_name: "", report_type: "Ultrasound", report_date: "", hospital_lab: "", doctor_name: "", pregnancy_week: "", description: "", notes: "", file: null };
+function Reports() { const user = JSON.parse(localStorage.getItem("user")); const [reports,setReports]=useState([]),[form,setForm]=useState(initial),[open,setOpen]=useState(false),[error,setError]=useState("");
+ const load=async()=>{try{const r=await fetch(`http://127.0.0.1:5000/api/reports?user_id=${user.id}`),d=await r.json();if(!r.ok)throw new Error(d.error);setReports(d.reports)}catch(e){setError(e.message)}};useEffect(()=>{if(user?.id)load()},[]);const change=e=>setForm({...form,[e.target.name]:e.target.files?e.target.files[0]:e.target.value});const submit=async e=>{e.preventDefault();const body=new FormData();Object.entries({...form,user_id:user.id}).forEach(([key,value])=>{if(value!==null)body.append(key,value)});const r=await fetch("http://127.0.0.1:5000/api/reports",{method:"POST",body}),d=await r.json();if(!r.ok){setError(d.error);return}setForm(initial);setOpen(false);load()};
+ const field=(label,name,type="text")=><label className="text-sm text-gray-700">{label}<input type={type} name={name} value={form[name]} onChange={change} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2.5"/></label>;
+ return <div className="max-w-6xl mx-auto"><div className="flex flex-wrap justify-between gap-4 mb-8"><div><h1 className="text-3xl font-bold text-gray-800">Medical Reports</h1><p className="mt-2 text-gray-500">Upload, organize, and review pregnancy documents in a timeline.</p></div><button onClick={()=>setOpen(!open)} className="flex items-center gap-2 bg-pink-600 text-white px-5 py-3 rounded-lg"><Plus size={18}/>Upload report</button></div>
+ {open&&<form onSubmit={submit} className="bg-white border rounded-2xl p-6 mb-7 grid md:grid-cols-2 gap-4">{field("Report name","report_name")}<label className="text-sm text-gray-700">Report type<select name="report_type" value={form.report_type} onChange={change} className="mt-1 w-full border rounded-lg px-3 py-2.5">{categories.map(x=><option key={x}>{x}</option>)}</select></label>{field("Date","report_date","date")}{field("Hospital / lab","hospital_lab")}{field("Doctor","doctor_name")} {field("Pregnancy week","pregnancy_week","number")}<label className="text-sm text-gray-700">Short description<textarea name="description" value={form.description} onChange={change} rows="3" className="mt-1 w-full border rounded-lg px-3 py-2.5"/></label><label className="text-sm text-gray-700">Notes<textarea name="notes" value={form.notes} onChange={change} rows="3" className="mt-1 w-full border rounded-lg px-3 py-2.5"/></label><label className="md:col-span-2 border-2 border-dashed rounded-xl p-4 text-sm text-gray-600 flex items-center gap-2"><Upload size={18}/> <input type="file" name="file" accept="image/*,.pdf" onChange={change}/></label><button className="md:col-span-2 bg-pink-600 text-white py-3 rounded-lg">Save report</button></form>}{error&&<p className="text-red-600 mb-4">{error}</p>}
+ <div className="relative border-l-2 border-pink-100 ml-3 pl-6 space-y-5">{reports.length===0?<Empty icon={<FileText className="mx-auto"/>} text="No reports uploaded yet."/>:reports.map(r=><article key={r.report_id} className="relative bg-white border rounded-2xl p-5"><span className="absolute -left-[33px] top-6 h-4 w-4 bg-pink-500 rounded-full border-4 border-pink-50"/><div className="flex justify-between gap-4"><div><h2 className="font-semibold text-gray-800">{r.report_name}</h2><p className="text-sm text-pink-600 mt-1">{r.report_type} · {r.report_date || "Date not added"}</p></div>{r.pregnancy_week&&<span className="text-sm bg-pink-50 text-pink-700 h-fit px-2 py-1 rounded-full">Week {r.pregnancy_week}</span>}</div><p className="text-sm text-gray-500 mt-2">{r.hospital_lab}{r.doctor_name&&` · ${r.doctor_name}`}</p>{r.description&&<p className="text-gray-700 mt-3">{r.description}</p>}{r.original_filename&&<p className="text-sm mt-3 text-pink-600"><FileText size={15} className="inline mr-1"/>{r.original_filename}</p>}</article>)}</div></div> }
 export default Reports;

@@ -251,3 +251,71 @@ ON APPOINTMENT (
     appointment_time
 )
 WHERE status <> 'Cancelled';
+
+
+-- =========================================================
+-- 11. PATIENT-MANAGED PREGNANCY CARE RECORDS
+-- =========================================================
+-- These tables keep personal planning records independent from the
+-- doctor scheduling workflow above.
+
+CREATE TABLE IF NOT EXISTS PREGNANCY_APPOINTMENT (
+    appointment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    appointment_date DATE NOT NULL,
+    appointment_time TIME,
+    doctor_name TEXT,
+    clinic_name TEXT,
+    appointment_type TEXT NOT NULL,
+    reason TEXT,
+    questions TEXT,
+    status TEXT NOT NULL DEFAULT 'Upcoming'
+        CHECK (status IN ('Upcoming', 'Completed', 'Cancelled')),
+    follow_up_date DATE,
+    reminder_enabled INTEGER NOT NULL DEFAULT 0 CHECK (reminder_enabled IN (0, 1)),
+    doctor_notes TEXT,
+    diagnosis TEXT,
+    tests_recommended TEXT,
+    next_appointment TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES PATIENT(patient_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS PREGNANCY_MEDICINE (
+    medicine_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    medicine_name TEXT NOT NULL,
+    purpose TEXT,
+    dosage TEXT,
+    frequency TEXT,
+    take_time TEXT,
+    start_date DATE,
+    end_date DATE,
+    prescribed_by TEXT,
+    instructions TEXT,
+    reminder_enabled INTEGER NOT NULL DEFAULT 0 CHECK (reminder_enabled IN (0, 1)),
+    status TEXT NOT NULL DEFAULT 'Active'
+        CHECK (status IN ('Active', 'Completed', 'Discontinued')),
+    notes TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES PATIENT(patient_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS PREGNANCY_REPORT (
+    report_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    report_name TEXT NOT NULL,
+    report_type TEXT NOT NULL,
+    report_date DATE,
+    hospital_lab TEXT,
+    doctor_name TEXT,
+    pregnancy_week INTEGER,
+    description TEXT,
+    file_path TEXT,
+    original_filename TEXT,
+    notes TEXT,
+    appointment_id INTEGER,
+    uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES PATIENT(patient_id) ON DELETE CASCADE,
+    FOREIGN KEY (appointment_id) REFERENCES PREGNANCY_APPOINTMENT(appointment_id) ON DELETE SET NULL
+);
