@@ -79,6 +79,40 @@ CREATE TABLE IF NOT EXISTS DOCTOR (
 
 
 -- =========================================================
+-- 4.1 DOCTOR_SCHEDULE (WEEKLY & DATE-SPECIFIC)
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS DOCTOR_SCHEDULE (
+    schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doctor_id INTEGER NOT NULL,
+    day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    slot_duration_minutes INTEGER NOT NULL DEFAULT 30,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+
+    FOREIGN KEY (doctor_id)
+        REFERENCES DOCTOR(doctor_id)
+        ON DELETE CASCADE,
+
+    UNIQUE(doctor_id, day_of_week)
+);
+
+CREATE TABLE IF NOT EXISTS DOCTOR_AVAILABLE_DATE (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doctor_id INTEGER NOT NULL,
+    available_date DATE NOT NULL,
+    time_slots TEXT NOT NULL,
+
+    FOREIGN KEY (doctor_id)
+        REFERENCES DOCTOR(doctor_id)
+        ON DELETE CASCADE,
+
+    UNIQUE(doctor_id, available_date)
+);
+
+
+-- =========================================================
 -- 5. PREGNANCY
 -- =========================================================
 
@@ -202,6 +236,10 @@ CREATE TABLE IF NOT EXISTS APPOINTMENT (
         ),
     reason TEXT,
     doctor_notes TEXT,
+    diagnosis TEXT,
+    tests_recommended TEXT,
+    follow_up_date DATE,
+    next_appointment TEXT,
 
     FOREIGN KEY (patient_id)
         REFERENCES PATIENT(patient_id)
@@ -262,6 +300,8 @@ WHERE status <> 'Cancelled';
 CREATE TABLE IF NOT EXISTS PREGNANCY_APPOINTMENT (
     appointment_id INTEGER PRIMARY KEY AUTOINCREMENT,
     patient_id INTEGER NOT NULL,
+    doctor_id INTEGER,
+    central_appointment_id INTEGER,
     appointment_date DATE NOT NULL,
     appointment_time TIME,
     doctor_name TEXT,
@@ -278,7 +318,8 @@ CREATE TABLE IF NOT EXISTS PREGNANCY_APPOINTMENT (
     tests_recommended TEXT,
     next_appointment TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (patient_id) REFERENCES PATIENT(patient_id) ON DELETE CASCADE
+    FOREIGN KEY (patient_id) REFERENCES PATIENT(patient_id) ON DELETE CASCADE,
+    FOREIGN KEY (doctor_id) REFERENCES DOCTOR(doctor_id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS PREGNANCY_MEDICINE (
