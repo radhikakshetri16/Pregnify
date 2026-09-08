@@ -17,9 +17,27 @@ import {
   AlertCircle,
   Eye,
   EyeOff,
-  Lock,
+  CalendarDays,
+  Clock,
 } from "lucide-react";
 import { checkPasswordRequirements } from "../utils/validation";
+import CalendarPicker from "../components/CalendarPicker";
+import { dateKey, formatDisplayDate, localDateKey } from "../utils/dates";
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000/api";
+
+const PRESET_SLOTS = [
+  "08:00 AM - 09:00 AM",
+  "09:00 AM - 10:00 AM",
+  "10:00 AM - 11:00 AM",
+  "11:00 AM - 12:00 PM",
+  "01:00 PM - 02:00 PM",
+  "02:00 PM - 03:00 PM",
+  "03:00 PM - 04:00 PM",
+  "04:00 PM - 05:00 PM",
+  "05:00 PM - 06:00 PM",
+  "06:00 PM - 07:00 PM",
+];
 
 function AdminDoctors() {
   const [doctors, setDoctors] = useState([]);
@@ -33,7 +51,6 @@ function AdminDoctors() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [submittingAdd, setSubmittingAdd] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [passwordTouched, setPasswordTouched] = useState(false);
   const [addForm, setAddForm] = useState({
     name: "",
     email: "",
@@ -51,14 +68,25 @@ function AdminDoctors() {
   const [submittingEdit, setSubmittingEdit] = useState(false);
   const [editForm, setEditForm] = useState(null);
 
+  // Schedule Modal State
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduleDoctor, setScheduleDoctor] = useState(null);
+  const [dateSchedules, setDateSchedules] = useState([]); // Array of { available_date: 'YYYY-MM-DD', time_slots: ['10:00 AM - 11:00 AM', ...] }
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState("");
+  const [customSlotInput, setCustomSlotInput] = useState("");
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const [submittingSchedule, setSubmittingSchedule] = useState(false);
+  const [scheduleModalError, setScheduleModalError] = useState("");
+
   // Action loading for toggle or delete
   const [actionLoading, setActionLoading] = useState(null);
 
   const pwStatus = checkPasswordRequirements(addForm.password);
+  const today = localDateKey();
 
   const fetchDoctors = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:5000/api/doctors");
+      const response = await fetch(`${API_BASE}/doctors`);
       const data = await response.json();
 
       if (!response.ok) {
@@ -85,17 +113,15 @@ function AdminDoctors() {
     setError("");
     setSuccessMsg("");
 
-    // Validate password complexity
     if (!pwStatus.isValid) {
       setError(pwStatus.errorMessage);
-      setPasswordTouched(true);
       return;
     }
 
     setSubmittingAdd(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:5000/api/doctors", {
+      const response = await fetch(`${API_BASE}/doctors`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -121,12 +147,8 @@ function AdminDoctors() {
         return;
       }
 
-      // Success feedback
-      setSuccessMsg(
-        `Doctor ${data.doctor.name} registered successfully. Please provide their login password to them securely.`
-      );
-
-      // Reset form & close add modal
+      setSuccessMsg(`Doctor ${addForm.name} registered successfully!`);
+      setShowAddModal(false);
       setAddForm({
         name: "",
         email: "",
@@ -138,11 +160,7 @@ function AdminDoctors() {
         practice_at: "",
         consultation_fee: "",
       });
-      setPasswordTouched(false);
       setShowPassword(false);
-      setShowAddModal(false);
-
-      // Refresh list
       fetchDoctors();
     } catch (err) {
       console.error(err);
@@ -163,7 +181,7 @@ function AdminDoctors() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:5000/api/doctors/${editForm.doctor_id}`,
+        `${API_BASE}/doctors/${editForm.doctor_id}`,
         {
           method: "PUT",
           headers: {
@@ -171,10 +189,8 @@ function AdminDoctors() {
           },
           body: JSON.stringify({
             name: editForm.name.trim(),
-            email: editForm.email.trim(),
             phone: editForm.phone?.trim() || "",
             specialization: editForm.specialization.trim(),
-            nmc_number: editForm.nmc_number.trim(),
             experience: Number(editForm.experience),
             practice_at: editForm.practice_at.trim(),
             consultation_fee: Number(editForm.consultation_fee),
@@ -191,7 +207,7 @@ function AdminDoctors() {
         return;
       }
 
-      setSuccessMsg(`Doctor ${editForm.name} updated successfully.`);
+      setSuccessMsg(`Doctor ${editForm.name} updated successfully!`);
       setShowEditModal(false);
       setEditForm(null);
       fetchDoctors();
@@ -212,7 +228,7 @@ function AdminDoctors() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:5000/api/doctors/${doctor.doctor_id}/status`,
+        `${API_BASE}/doctors/${doctor.doctor_id}/status`,
         {
           method: "PATCH",
           headers: {
@@ -254,12 +270,9 @@ function AdminDoctors() {
     setSuccessMsg("");
 
     try {
-      const response = await fetch(
-        `http://127.0.0.1:5000/api/doctors/${doctorId}`,
-        {
-          method: "DELETE",
-        }
-      );
+      const response = await fetch(`${API_BASE}/doctors/${doctorId}`, {
+        method: "DELETE",
+      });
 
       const data = await response.json();
 
@@ -277,6 +290,177 @@ function AdminDoctors() {
       setActionLoading(null);
     }
   };
+
+  // Open Schedule Modal
+  const handleOpenSchedule = async (doctor) => {
+    setScheduleDoctor(doctor);
+    setScheduleModalError("");
+    setSelectedCalendarDate(today);
+    setShowScheduleModal(true);
+    setLoadingSchedule(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/doctors/${doctor.doctor_id}/schedule`
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        setScheduleModalError(data.error || "Failed to load doctor schedule.");
+        return;
+      }
+
+      setDateSchedules(
+        (data.date_schedules || []).map((item) => ({
+          available_date: dateKey(item.available_date),
+          time_slots: Array.isArray(item.time_slots) ? item.time_slots : [],
+        }))
+      );
+    } catch (err) {
+      console.error(err);
+      setScheduleModalError(
+        "Unable to connect to server. Please ensure the backend is running."
+      );
+    } finally {
+      setLoadingSchedule(false);
+    }
+  };
+
+  // Toggle a single time slot for the selected calendar date
+  const handleToggleSlotForDate = (slotStr) => {
+    if (!selectedCalendarDate) return;
+    const selected = dateKey(selectedCalendarDate);
+
+    setDateSchedules((prev) => {
+      const existing = prev.find((item) => dateKey(item.available_date) === selected);
+
+      if (existing) {
+        let updatedSlots = [];
+        if (existing.time_slots.includes(slotStr)) {
+          // Remove slot
+          updatedSlots = existing.time_slots.filter((s) => s !== slotStr);
+        } else {
+          // Add slot
+          updatedSlots = [...existing.time_slots, slotStr];
+        }
+
+        if (updatedSlots.length === 0) {
+          return prev.filter((item) => dateKey(item.available_date) !== selected);
+        }
+
+        return prev.map((item) =>
+          dateKey(item.available_date) === selected
+            ? { ...item, available_date: selected, time_slots: updatedSlots }
+            : item
+        );
+      } else {
+        return [
+          ...prev,
+          {
+            available_date: selected,
+            time_slots: [slotStr],
+          },
+        ];
+      }
+    });
+  };
+
+  // Quick preset: Set standard 2 slots (10-11 AM and 5-6 PM)
+  const handleSetQuickTwoSlots = () => {
+    if (!selectedCalendarDate) return;
+    const selected = dateKey(selectedCalendarDate);
+    const standardTwo = ["10:00 AM - 11:00 AM", "05:00 PM - 06:00 PM"];
+    setDateSchedules((prev) => {
+      const existing = prev.find((item) => dateKey(item.available_date) === selected);
+      if (existing) {
+        return prev.map((item) =>
+          dateKey(item.available_date) === selected
+            ? { ...item, available_date: selected, time_slots: standardTwo }
+            : item
+        );
+      }
+      return [...prev, { available_date: selected, time_slots: standardTwo }];
+    });
+  };
+
+  // Add custom time slot
+  const handleAddCustomSlot = (e) => {
+    e.preventDefault();
+    if (!customSlotInput.trim() || !selectedCalendarDate) return;
+    handleToggleSlotForDate(customSlotInput.trim());
+    setCustomSlotInput("");
+  };
+
+  // Remove an entire scheduled date
+  const handleRemoveDate = (dateStr) => {
+    setDateSchedules((prev) =>
+      prev.filter((item) => dateKey(item.available_date) !== dateKey(dateStr))
+    );
+  };
+
+  // Save Doctor Schedule
+  const handleSaveSchedule = async (e) => {
+    e.preventDefault();
+    if (!scheduleDoctor) return;
+
+    setScheduleModalError("");
+    setSubmittingSchedule(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/doctors/${scheduleDoctor.doctor_id}/schedule`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            date_schedules: dateSchedules
+              .map((item) => ({
+                available_date: dateKey(item.available_date),
+                time_slots: item.time_slots || [],
+              }))
+              .filter((item) => item.available_date && item.time_slots.length > 0),
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setScheduleModalError(data.error || "Failed to save schedule.");
+        return;
+      }
+
+      setSuccessMsg(`Schedule updated for Dr. ${scheduleDoctor.name}!`);
+      setShowScheduleModal(false);
+    } catch (err) {
+      console.error(err);
+      setScheduleModalError("Unable to connect to server.");
+    } finally {
+      setSubmittingSchedule(false);
+    }
+  };
+
+  // Get active slots for current calendar date
+  const activeSlotsForSelectedDate =
+    dateSchedules.find((d) => dateKey(d.available_date) === dateKey(selectedCalendarDate))
+      ?.time_slots || [];
+
+  const scheduledDateStrings = dateSchedules.map((d) => dateKey(d.available_date)).filter(Boolean);
+
+  const badgeMap = {};
+  dateSchedules.forEach((item) => {
+    const key = dateKey(item.available_date);
+    if (key && item.time_slots?.length > 0) {
+      badgeMap[key] = item.time_slots.length;
+    }
+  });
+
+  const getFormattedDateLabel = (dateStr) => formatDisplayDate(dateStr);
+
+
+
 
   // Filtered doctors
   const filteredDoctors = doctors.filter((doc) => {
@@ -297,11 +481,11 @@ function AdminDoctors() {
       {/* Header */}
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
             Doctors
           </h1>
-          <p className="text-gray-500 mt-2">
-            Register and manage doctors on Pregnify.
+          <p className="text-gray-500 mt-1 text-sm">
+            Register doctors and set their calendar schedule & time slots.
           </p>
         </div>
 
@@ -312,7 +496,7 @@ function AdminDoctors() {
             setSuccessMsg("");
             setShowAddModal(true);
           }}
-          className="flex items-center gap-2 px-5 py-3 bg-pink-600 text-white rounded-xl font-semibold hover:bg-pink-700 transition self-start sm:self-auto cursor-pointer shadow-xs"
+          className="flex items-center gap-2 px-5 py-2.5 bg-pink-600 text-white rounded-xl font-semibold hover:bg-pink-700 transition cursor-pointer shadow-xs self-start sm:self-auto text-sm"
         >
           <Plus size={18} />
           Register Doctor
@@ -334,7 +518,7 @@ function AdminDoctors() {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-6 flex flex-col sm:flex-row gap-4 justify-between items-center">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs p-4 mb-6 flex flex-col sm:flex-row gap-4 justify-between items-center">
         {/* Search */}
         <div className="relative w-full sm:w-96">
           <Search
@@ -363,7 +547,7 @@ function AdminDoctors() {
                 onClick={() => setStatusFilter(st)}
                 className={`px-3 py-1 text-xs font-medium rounded-lg transition cursor-pointer ${
                   statusFilter === st
-                    ? "bg-white text-gray-800 shadow-xs font-semibold"
+                    ? "bg-white text-gray-800 shadow-2xs font-semibold"
                     : "text-gray-500 hover:text-gray-800"
                 }`}
               >
@@ -374,21 +558,21 @@ function AdminDoctors() {
         </div>
       </div>
 
-      {/* Doctors List (Passwords NEVER displayed) */}
+      {/* Doctors List */}
       {loading ? (
-        <div className="flex items-center justify-center min-h-[40vh]">
-          <p className="text-gray-500">Loading doctors...</p>
+        <div className="flex items-center justify-center min-h-[35vh]">
+          <p className="text-gray-500 text-sm">Loading doctors...</p>
         </div>
       ) : filteredDoctors.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
-          <Stethoscope size={48} className="mx-auto text-gray-300 mb-4" />
-          <h3 className="text-lg font-semibold text-gray-800">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs p-12 text-center">
+          <Stethoscope size={44} className="mx-auto text-gray-300 mb-3" />
+          <h3 className="text-base font-semibold text-gray-800">
             No Doctors Found
           </h3>
-          <p className="text-gray-500 mt-2 text-sm">
+          <p className="text-gray-500 mt-1 text-xs">
             {searchTerm || statusFilter !== "All"
               ? "No doctors match the selected filters."
-              : "No doctors have been registered yet. Click 'Register Doctor' above."}
+              : "No doctors registered yet. Click 'Register Doctor' above."}
           </p>
         </div>
       ) : (
@@ -396,78 +580,73 @@ function AdminDoctors() {
           {filteredDoctors.map((doc) => (
             <div
               key={doc.doctor_id}
-              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col justify-between"
+              className="bg-white rounded-2xl border border-gray-200/80 shadow-2xs p-5 flex flex-col justify-between"
             >
               <div>
-                {/* Doctor Header */}
-                <div className="flex items-start justify-between gap-3 mb-4">
+                <div className="flex items-start justify-between gap-3 mb-3">
                   <div>
-                    <h3 className="font-bold text-gray-800 text-lg">
+                    <h3 className="font-bold text-gray-800 text-base">
                       {doc.name}
                     </h3>
-                    <p className="text-xs font-semibold text-pink-600 bg-pink-50 inline-block px-2.5 py-1 rounded-lg mt-1">
+                    <p className="text-xs font-semibold text-pink-600 bg-pink-50 inline-block px-2.5 py-0.5 rounded-md mt-1">
                       {doc.specialization}
                     </p>
                   </div>
 
                   <span
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 ${
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold flex items-center gap-1.5 ${
                       doc.status === "Active"
-                        ? "bg-green-50 text-green-700"
+                        ? "bg-emerald-50 text-emerald-700"
                         : "bg-gray-100 text-gray-600"
                     }`}
                   >
                     {doc.status === "Active" ? (
-                      <CheckCircle2 size={13} />
+                      <CheckCircle2 size={12} />
                     ) : (
-                      <XCircle size={13} />
+                      <XCircle size={12} />
                     )}
                     {doc.status}
                   </span>
                 </div>
 
-                {/* Details Grid */}
-                <div className="space-y-2 text-sm text-gray-600 mb-6 bg-gray-50 p-4 rounded-xl">
+                <div className="space-y-1.5 text-xs text-gray-600 mb-5 bg-gray-50/80 p-3.5 rounded-xl border border-gray-100">
                   <div className="flex items-center gap-2">
-                    <Mail size={15} className="text-gray-400 shrink-0" />
+                    <Mail size={14} className="text-gray-400 shrink-0" />
                     <span className="truncate">{doc.email}</span>
                   </div>
 
                   {doc.phone && (
                     <div className="flex items-center gap-2">
-                      <Phone size={15} className="text-gray-400 shrink-0" />
+                      <Phone size={14} className="text-gray-400 shrink-0" />
                       <span>{doc.phone}</span>
                     </div>
                   )}
 
                   <div className="flex items-center gap-2">
-                    <Award size={15} className="text-gray-400 shrink-0" />
+                    <Award size={14} className="text-gray-400 shrink-0" />
                     <span>
                       NMC: <strong className="text-gray-700">{doc.nmc_number}</strong> •{" "}
-                      {doc.experience} {doc.experience === 1 ? "yr" : "yrs"} experience
+                      {doc.experience} yrs exp
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <MapPin size={15} className="text-gray-400 shrink-0" />
+                    <MapPin size={14} className="text-gray-400 shrink-0" />
                     <span className="truncate">{doc.practice_at}</span>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <Banknote size={15} className="text-gray-400 shrink-0" />
+                    <Banknote size={14} className="text-gray-400 shrink-0" />
                     <span>
-                      Fee:{" "}
-                      <strong className="text-gray-800">
-                        NPR {doc.consultation_fee}
-                      </strong>
+                      Fee: <strong className="text-gray-800">NPR {doc.consultation_fee}</strong>
                     </span>
                   </div>
                 </div>
               </div>
 
               {/* Actions Footer */}
-              <div className="pt-4 border-t border-gray-100 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+              <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
                     onClick={() => {
@@ -482,12 +661,21 @@ function AdminDoctors() {
 
                   <button
                     type="button"
+                    onClick={() => handleOpenSchedule(doc)}
+                    className="px-3 py-1.5 bg-pink-50 hover:bg-pink-100 text-pink-700 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <CalendarDays size={13} />
+                    Schedule
+                  </button>
+
+                  <button
+                    type="button"
                     disabled={actionLoading === doc.doctor_id}
                     onClick={() => handleToggleStatus(doc)}
                     className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
                       doc.status === "Active"
                         ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
-                        : "bg-green-50 text-green-700 hover:bg-green-100"
+                        : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                     }`}
                   >
                     {doc.status === "Active" ? "Deactivate" : "Activate"}
@@ -498,10 +686,10 @@ function AdminDoctors() {
                   type="button"
                   disabled={actionLoading === doc.doctor_id}
                   onClick={() => handleDeleteDoctor(doc.doctor_id, doc.name)}
-                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                  className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition cursor-pointer shrink-0"
                   title="Delete Doctor"
                 >
-                  <Trash2 size={15} />
+                  <Trash2 size={14} />
                 </button>
               </div>
             </div>
@@ -513,29 +701,29 @@ function AdminDoctors() {
       {/* REGISTER DOCTOR MODAL */}
       {/* ========================================================= */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 sm:p-8 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl max-h-[90vh] overflow-y-auto border border-gray-100">
             <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100">
               <div>
-                <h2 className="text-xl font-bold text-gray-800">
-                  Register New Doctor
+                <h2 className="text-lg font-bold text-gray-800">
+                  Register Doctor
                 </h2>
-                <p className="text-xs text-gray-500 mt-1">
-                  Enter doctor details and assign their initial password.
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Add a new verified doctor to Pregnify.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
-                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+                className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition cursor-pointer"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
             <form onSubmit={handleAddDoctor} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                   Full Name *
                 </label>
                 <input
@@ -544,49 +732,31 @@ function AdminDoctors() {
                   onChange={(e) =>
                     setAddForm({ ...addForm, name: e.target.value })
                   }
-                  placeholder="e.g. Dr. Sita Nepal"
+                  placeholder="e.g. Dr. Ayush Dev"
                   required
-                  className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email Address *
-                  </label>
-                  <input
-                    type="email"
-                    value={addForm.email}
-                    onChange={(e) =>
-                      setAddForm({ ...addForm, email: e.target.value })
-                    }
-                    placeholder="doctor@pregnify.com"
-                    required
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="text"
-                    value={addForm.phone}
-                    onChange={(e) =>
-                      setAddForm({ ...addForm, phone: e.target.value })
-                    }
-                    placeholder="98XXXXXXXX"
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                  Email Address *
+                </label>
+                <input
+                  type="email"
+                  value={addForm.email}
+                  onChange={(e) =>
+                    setAddForm({ ...addForm, email: e.target.value })
+                  }
+                  placeholder="doctor@example.com"
+                  required
+                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
               </div>
 
-              {/* Initial Password Field (Set manually by Admin) */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Password *
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                  Initial Password *
                 </label>
                 <div className="relative">
                   <input
@@ -594,114 +764,24 @@ function AdminDoctors() {
                     value={addForm.password}
                     onChange={(e) => {
                       setAddForm({ ...addForm, password: e.target.value });
-                      if (!passwordTouched) setPasswordTouched(true);
                     }}
-                    onFocus={() => setPasswordTouched(true)}
-                    placeholder="Set doctor's initial password"
+                    placeholder="Create a strong password"
                     required
-                    className="w-full pl-4 pr-11 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 pr-10"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
                     {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
-
-                {/* Password Policy Checklist */}
-                {(passwordTouched || addForm.password) && (
-                  <div className="mt-2.5 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs space-y-1">
-                    <p className="font-semibold text-gray-700 mb-1">
-                      Password Requirements:
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                      <div
-                        className={`flex items-center gap-1.5 ${
-                          pwStatus.rules.minLength
-                            ? "text-green-600 font-medium"
-                            : "text-gray-500"
-                        }`}
-                      >
-                        {pwStatus.rules.minLength ? (
-                          <Check size={13} className="text-green-600 shrink-0" />
-                        ) : (
-                          <span className="w-2.5 h-2.5 rounded-full border border-gray-300 inline-block shrink-0" />
-                        )}
-                        <span>Min. 6 chars</span>
-                      </div>
-
-                      <div
-                        className={`flex items-center gap-1.5 ${
-                          pwStatus.rules.hasUppercase
-                            ? "text-green-600 font-medium"
-                            : "text-gray-500"
-                        }`}
-                      >
-                        {pwStatus.rules.hasUppercase ? (
-                          <Check size={13} className="text-green-600 shrink-0" />
-                        ) : (
-                          <span className="w-2.5 h-2.5 rounded-full border border-gray-300 inline-block shrink-0" />
-                        )}
-                        <span>1 Uppercase (A-Z)</span>
-                      </div>
-
-                      <div
-                        className={`flex items-center gap-1.5 ${
-                          pwStatus.rules.hasLowercase
-                            ? "text-green-600 font-medium"
-                            : "text-gray-500"
-                        }`}
-                      >
-                        {pwStatus.rules.hasLowercase ? (
-                          <Check size={13} className="text-green-600 shrink-0" />
-                        ) : (
-                          <span className="w-2.5 h-2.5 rounded-full border border-gray-300 inline-block shrink-0" />
-                        )}
-                        <span>1 Lowercase (a-z)</span>
-                      </div>
-
-                      <div
-                        className={`flex items-center gap-1.5 ${
-                          pwStatus.rules.hasNumber
-                            ? "text-green-600 font-medium"
-                            : "text-gray-500"
-                        }`}
-                      >
-                        {pwStatus.rules.hasNumber ? (
-                          <Check size={13} className="text-green-600 shrink-0" />
-                        ) : (
-                          <span className="w-2.5 h-2.5 rounded-full border border-gray-300 inline-block shrink-0" />
-                        )}
-                        <span>1 Number (0-9)</span>
-                      </div>
-
-                      <div
-                        className={`flex items-center gap-1.5 sm:col-span-2 ${
-                          pwStatus.rules.hasSpecial
-                            ? "text-green-600 font-medium"
-                            : "text-gray-500"
-                        }`}
-                      >
-                        {pwStatus.rules.hasSpecial ? (
-                          <Check size={13} className="text-green-600 shrink-0" />
-                        ) : (
-                          <span className="w-2.5 h-2.5 rounded-full border border-gray-300 inline-block shrink-0" />
-                        )}
-                        <span>1 Special char (!@#$%...)</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <p className="text-xs text-gray-400 mt-1">
-                  Share this password securely with the doctor.
-                </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                     Specialization *
                   </label>
                   <input
@@ -710,14 +790,14 @@ function AdminDoctors() {
                     onChange={(e) =>
                       setAddForm({ ...addForm, specialization: e.target.value })
                     }
-                    placeholder="e.g. Obstetrician"
+                    placeholder="e.g. Gynecologist"
                     required
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                     NMC Number *
                   </label>
                   <input
@@ -726,40 +806,38 @@ function AdminDoctors() {
                     onChange={(e) =>
                       setAddForm({ ...addForm, nmc_number: e.target.value })
                     }
-                    placeholder="e.g. 14235"
+                    placeholder="e.g. 12345"
                     required
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                     Experience (Years) *
                   </label>
                   <input
                     type="number"
                     min="0"
-                    max="50"
                     value={addForm.experience}
                     onChange={(e) =>
                       setAddForm({ ...addForm, experience: e.target.value })
                     }
                     placeholder="e.g. 5"
                     required
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                     Consultation Fee (NPR) *
                   </label>
                   <input
                     type="number"
-                    min="300"
-                    step="0.01"
+                    min="0"
                     value={addForm.consultation_fee}
                     onChange={(e) =>
                       setAddForm({
@@ -767,16 +845,16 @@ function AdminDoctors() {
                         consultation_fee: e.target.value,
                       })
                     }
-                    placeholder="e.g. 800"
+                    placeholder="e.g. 1000"
                     required
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Practicing At (Clinic / Hospital) *
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                  Practicing At *
                 </label>
                 <input
                   type="text"
@@ -784,9 +862,9 @@ function AdminDoctors() {
                   onChange={(e) =>
                     setAddForm({ ...addForm, practice_at: e.target.value })
                   }
-                  placeholder="e.g. Norvic International Hospital, Kathmandu"
+                  placeholder="Hospital or Clinic Name"
                   required
-                  className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
                 />
               </div>
 
@@ -794,7 +872,7 @@ function AdminDoctors() {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition cursor-pointer"
+                  className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -815,24 +893,24 @@ function AdminDoctors() {
       {/* EDIT DOCTOR MODAL */}
       {/* ========================================================= */}
       {showEditModal && editForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 sm:p-8 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl max-h-[90vh] overflow-y-auto border border-gray-100">
             <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100">
-              <h2 className="text-xl font-bold text-gray-800">
-                Edit Doctor Information
+              <h2 className="text-lg font-bold text-gray-800">
+                Edit Doctor Details
               </h2>
               <button
                 type="button"
                 onClick={() => setShowEditModal(false)}
-                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+                className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition cursor-pointer"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
             <form onSubmit={handleEditDoctor} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                   Full Name *
                 </label>
                 <input
@@ -842,79 +920,28 @@ function AdminDoctors() {
                     setEditForm({ ...editForm, name: e.target.value })
                   }
                   required
-                  className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email Address *
-                  </label>
-                  <input
-                    type="email"
-                    value={editForm.email}
-                    onChange={(e) =>
-                      setEditForm({ ...editForm, email: e.target.value })
-                    }
-                    required
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="text"
-                    value={editForm.phone || ""}
-                    onChange={(e) =>
-                      setEditForm({ ...editForm, phone: e.target.value })
-                    }
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                  Specialization *
+                </label>
+                <input
+                  type="text"
+                  value={editForm.specialization}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, specialization: e.target.value })
+                  }
+                  required
+                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Specialization *
-                  </label>
-                  <input
-                    type="text"
-                    value={editForm.specialization}
-                    onChange={(e) =>
-                      setEditForm({
-                        ...editForm,
-                        specialization: e.target.value,
-                      })
-                    }
-                    required
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    NMC Number *
-                  </label>
-                  <input
-                    type="text"
-                    value={editForm.nmc_number}
-                    onChange={(e) =>
-                      setEditForm({ ...editForm, nmc_number: e.target.value })
-                    }
-                    required
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                     Experience (Years) *
                   </label>
                   <input
@@ -925,18 +952,17 @@ function AdminDoctors() {
                       setEditForm({ ...editForm, experience: e.target.value })
                     }
                     required
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                     Consultation Fee (NPR) *
                   </label>
                   <input
                     type="number"
                     min="0"
-                    step="0.01"
                     value={editForm.consultation_fee}
                     onChange={(e) =>
                       setEditForm({
@@ -945,13 +971,13 @@ function AdminDoctors() {
                       })
                     }
                     required
-                    className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                   Practicing At *
                 </label>
                 <input
@@ -961,12 +987,12 @@ function AdminDoctors() {
                     setEditForm({ ...editForm, practice_at: e.target.value })
                   }
                   required
-                  className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                   Account Status
                 </label>
                 <select
@@ -974,7 +1000,7 @@ function AdminDoctors() {
                   onChange={(e) =>
                     setEditForm({ ...editForm, status: e.target.value })
                   }
-                  className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 bg-white"
                 >
                   <option value="Active">Active</option>
                   <option value="Inactive">Inactive</option>
@@ -985,7 +1011,7 @@ function AdminDoctors() {
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition cursor-pointer"
+                  className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1001,6 +1027,238 @@ function AdminDoctors() {
           </div>
         </div>
       )}
+
+      {/* ========================================================= */}
+      {/* DOCTOR DATE & TIME SLOTS SCHEDULE MODAL */}
+      {/* ========================================================= */}
+      {showScheduleModal && scheduleDoctor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-4xl w-full p-5 sm:p-7 shadow-2xl max-h-[94vh] overflow-y-auto border border-gray-100">
+            {/* Header */}
+            <div className="flex items-start justify-between pb-4 mb-4 border-b border-gray-100">
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-pink-50 rounded-xl text-pink-600">
+                    <CalendarDays size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800">
+                      Doctor Schedule & Availability
+                    </h2>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Dr. {scheduleDoctor.name} • {scheduleDoctor.specialization} ({scheduleDoctor.practice_at})
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {dateSchedules.length > 0 && (
+                  <span className="hidden sm:inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-pink-50 text-pink-700 border border-pink-100">
+                    {dateSchedules.length} {dateSchedules.length === 1 ? "date" : "dates"} scheduled
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowScheduleModal(false)}
+                  className="p-2 text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-100 transition cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {scheduleModalError && (
+              <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl text-xs flex items-start gap-2">
+                <AlertCircle size={16} className="shrink-0 mt-0.5 text-red-600" />
+                <span>{scheduleModalError}</span>
+              </div>
+            )}
+
+            {loadingSchedule ? (
+              <div className="py-16 text-center text-gray-500 text-xs">
+                Loading schedule for Dr. {scheduleDoctor.name}...
+              </div>
+            ) : (
+              <form onSubmit={handleSaveSchedule} className="space-y-5">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  {/* Left Column: Calendar */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
+                        1. Select Calendar Date
+                      </label>
+                      <span className="text-[11px] text-gray-500">
+                        Selected: <strong className="text-pink-600">{selectedCalendarDate || "None"}</strong>
+                      </span>
+                    </div>
+
+                    <CalendarPicker
+                      selectedDate={selectedCalendarDate}
+                      onSelectDate={(dateStr) => setSelectedCalendarDate(dateKey(dateStr))}
+                      highlightedDates={scheduledDateStrings}
+                      badgeMap={badgeMap}
+                      minDate={today}
+                      subtitle="Click a date, then select time slots. Only dates with slots appear for patients."
+                      availableLabel="Configured Schedule"
+                    />
+                  </div>
+
+                  {/* Right Column: Time Slots for Selected Date */}
+                  <div className="flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
+                          2. Time Slots for {getFormattedDateLabel(selectedCalendarDate)}
+                        </label>
+                        {activeSlotsForSelectedDate.length > 0 ? (
+                          <span className="text-[11px] font-bold text-pink-700 bg-pink-50 border border-pink-200 px-2.5 py-0.5 rounded-full">
+                            {activeSlotsForSelectedDate.length} active
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-gray-400">
+                            No slots selected
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Quick helpers */}
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <button
+                          type="button"
+                          onClick={handleSetQuickTwoSlots}
+                          className="px-3 py-1.5 bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200 rounded-xl text-xs font-medium transition cursor-pointer"
+                        >
+                          Select 10-11 AM & 5-6 PM
+                        </button>
+                        {activeSlotsForSelectedDate.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDate(selectedCalendarDate)}
+                            className="px-3 py-1.5 text-gray-500 hover:text-red-600 rounded-xl text-xs font-medium transition cursor-pointer"
+                          >
+                            Clear Date
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Slot Grid */}
+                      <div className="bg-gray-50/80 border border-gray-200 rounded-2xl p-3 mb-3">
+                        <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto p-0.5">
+                          {PRESET_SLOTS.map((slot) => {
+                            const isSlotActive =
+                              activeSlotsForSelectedDate.includes(slot);
+                            return (
+                              <button
+                                key={slot}
+                                type="button"
+                                onClick={() => handleToggleSlotForDate(slot)}
+                                className={`py-2 px-2.5 rounded-xl text-xs font-semibold transition cursor-pointer text-center flex items-center justify-center gap-1.5 ${
+                                  isSlotActive
+                                    ? "bg-pink-600 text-white shadow-xs"
+                                    : "bg-white text-gray-700 border border-gray-200 hover:border-pink-300 hover:bg-pink-50/50"
+                                }`}
+                              >
+                                {isSlotActive ? (
+                                  <Check size={13} className="shrink-0" />
+                                ) : (
+                                  <Clock size={12} className="text-gray-400 shrink-0" />
+                                )}
+                                <span className="truncate">{slot}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Add Custom Slot */}
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={customSlotInput}
+                          onChange={(e) => setCustomSlotInput(e.target.value)}
+                          placeholder="Custom time (e.g. 05:30 PM - 06:30 PM)"
+                          className="w-full px-3 py-2 text-xs border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddCustomSlot}
+                          className="px-3.5 py-2 bg-gray-100 hover:bg-pink-600 hover:text-white text-gray-700 text-xs font-semibold rounded-xl transition cursor-pointer shrink-0 border border-gray-200"
+                        >
+                          + Add Time
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Selected Date Summary */}
+                    {activeSlotsForSelectedDate.length > 0 && (
+                      <div className="mt-3 p-3 bg-pink-50/70 border border-pink-200 rounded-2xl text-xs text-pink-950">
+                        <span className="font-semibold">{selectedCalendarDate}: </span>
+                        <span>{activeSlotsForSelectedDate.join(", ")}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bottom Section: Configured Scheduled Dates List */}
+                {dateSchedules.length > 0 && (
+                  <div className="pt-4 border-t border-gray-100">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-2">
+                      Scheduled Dates for this Doctor ({dateSchedules.length})
+                    </label>
+
+                    <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-1">
+                      {dateSchedules.map((item) => (
+                        <div
+                          key={item.available_date}
+                          className="inline-flex items-center gap-2 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-xl text-xs text-gray-700"
+                        >
+                          <span
+                            onClick={() => setSelectedCalendarDate(item.available_date)}
+                            className="font-bold text-pink-700 cursor-pointer hover:underline"
+                          >
+                            {getFormattedDateLabel(item.available_date)}:
+                          </span>
+                          <span className="text-gray-600">
+                            {item.time_slots.length} {item.time_slots.length === 1 ? "slot" : "slots"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDate(item.available_date)}
+                            className="text-gray-400 hover:text-red-500 transition cursor-pointer"
+                            title="Remove date"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Modal Actions Footer */}
+                <div className="pt-4 flex items-center justify-end gap-3 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowScheduleModal(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingSchedule}
+                    className="px-6 py-2.5 bg-pink-600 text-white text-sm font-semibold rounded-xl hover:bg-pink-700 disabled:opacity-50 transition cursor-pointer shadow-xs"
+                  >
+                    {submittingSchedule ? "Saving..." : "Save Doctor Schedule"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+      {/* Schedule Modal End */}
     </div>
   );
 }

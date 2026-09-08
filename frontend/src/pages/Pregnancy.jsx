@@ -188,7 +188,7 @@ function Pregnancy() {
               className="flex items-center justify-center gap-2 w-full
                          bg-pink-600 text-white py-3 rounded-lg
                          font-medium hover:bg-pink-700
-                         disabled:opacity-50"
+                         disabled:opacity-50 transition"
             >
               <Save size={18} />
 

@@ -79,6 +79,40 @@ CREATE TABLE IF NOT EXISTS DOCTOR (
 
 
 -- =========================================================
+-- 4.1 DOCTOR_SCHEDULE (WEEKLY & DATE-SPECIFIC)
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS DOCTOR_SCHEDULE (
+    schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doctor_id INTEGER NOT NULL,
+    day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    slot_duration_minutes INTEGER NOT NULL DEFAULT 30,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+
+    FOREIGN KEY (doctor_id)
+        REFERENCES DOCTOR(doctor_id)
+        ON DELETE CASCADE,
+
+    UNIQUE(doctor_id, day_of_week)
+);
+
+CREATE TABLE IF NOT EXISTS DOCTOR_AVAILABLE_DATE (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doctor_id INTEGER NOT NULL,
+    available_date DATE NOT NULL,
+    time_slots TEXT NOT NULL,
+
+    FOREIGN KEY (doctor_id)
+        REFERENCES DOCTOR(doctor_id)
+        ON DELETE CASCADE,
+
+    UNIQUE(doctor_id, available_date)
+);
+
+
+-- =========================================================
 -- 5. PREGNANCY
 -- =========================================================
 
@@ -202,6 +236,10 @@ CREATE TABLE IF NOT EXISTS APPOINTMENT (
         ),
     reason TEXT,
     doctor_notes TEXT,
+    diagnosis TEXT,
+    tests_recommended TEXT,
+    follow_up_date DATE,
+    next_appointment TEXT,
 
     FOREIGN KEY (patient_id)
         REFERENCES PATIENT(patient_id)
@@ -251,3 +289,74 @@ ON APPOINTMENT (
     appointment_time
 )
 WHERE status <> 'Cancelled';
+
+
+-- =========================================================
+-- 11. PATIENT-MANAGED PREGNANCY CARE RECORDS
+-- =========================================================
+-- These tables keep personal planning records independent from the
+-- doctor scheduling workflow above.
+
+CREATE TABLE IF NOT EXISTS PREGNANCY_APPOINTMENT (
+    appointment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    doctor_id INTEGER,
+    central_appointment_id INTEGER,
+    appointment_date DATE NOT NULL,
+    appointment_time TIME,
+    doctor_name TEXT,
+    clinic_name TEXT,
+    appointment_type TEXT NOT NULL,
+    reason TEXT,
+    questions TEXT,
+    status TEXT NOT NULL DEFAULT 'Upcoming'
+        CHECK (status IN ('Upcoming', 'Completed', 'Cancelled')),
+    follow_up_date DATE,
+    reminder_enabled INTEGER NOT NULL DEFAULT 0 CHECK (reminder_enabled IN (0, 1)),
+    doctor_notes TEXT,
+    diagnosis TEXT,
+    tests_recommended TEXT,
+    next_appointment TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES PATIENT(patient_id) ON DELETE CASCADE,
+    FOREIGN KEY (doctor_id) REFERENCES DOCTOR(doctor_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS PREGNANCY_MEDICINE (
+    medicine_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    medicine_name TEXT NOT NULL,
+    purpose TEXT,
+    dosage TEXT,
+    frequency TEXT,
+    take_time TEXT,
+    start_date DATE,
+    end_date DATE,
+    prescribed_by TEXT,
+    instructions TEXT,
+    reminder_enabled INTEGER NOT NULL DEFAULT 0 CHECK (reminder_enabled IN (0, 1)),
+    status TEXT NOT NULL DEFAULT 'Active'
+        CHECK (status IN ('Active', 'Completed', 'Discontinued')),
+    notes TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES PATIENT(patient_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS PREGNANCY_REPORT (
+    report_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    report_name TEXT NOT NULL,
+    report_type TEXT NOT NULL,
+    report_date DATE,
+    hospital_lab TEXT,
+    doctor_name TEXT,
+    pregnancy_week INTEGER,
+    description TEXT,
+    file_path TEXT,
+    original_filename TEXT,
+    notes TEXT,
+    appointment_id INTEGER,
+    uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES PATIENT(patient_id) ON DELETE CASCADE,
+    FOREIGN KEY (appointment_id) REFERENCES PREGNANCY_APPOINTMENT(appointment_id) ON DELETE SET NULL
+);
