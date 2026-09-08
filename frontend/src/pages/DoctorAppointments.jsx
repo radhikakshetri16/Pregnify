@@ -28,7 +28,12 @@ function DoctorAppointments() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:5000/api/doctors/${doctor.doctor_id}/appointments`
+        `http://127.0.0.1:5000/api/doctors/${doctor.doctor_id}/appointments`,
+        {
+          headers: {
+            "X-Doctor-Id": String(doctor.doctor_id),
+          },
+        }
       );
       const data = await response.json();
 
@@ -60,6 +65,7 @@ function DoctorAppointments() {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
+            "X-Doctor-Id": String(doctor.doctor_id),
           },
           body: JSON.stringify({ status: newStatus }),
         }
@@ -89,6 +95,7 @@ function DoctorAppointments() {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
+            "X-Doctor-Id": String(doctor.doctor_id),
           },
           body: JSON.stringify({ doctor_notes: doctorNotes }),
         }

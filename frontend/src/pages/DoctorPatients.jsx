@@ -22,7 +22,12 @@ function DoctorPatients() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:5000/api/doctors/${doctor.doctor_id}/patients`
+        `http://127.0.0.1:5000/api/doctors/${doctor.doctor_id}/patients`,
+        {
+          headers: {
+            "X-Doctor-Id": String(doctor.doctor_id),
+          },
+        }
       );
       const data = await response.json();
 

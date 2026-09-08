@@ -809,6 +809,57 @@ def update_doctor_status(doctor_id):
 
 
 # --------------------------------
+# DOCTOR AUTHORIZATION HELPER
+# --------------------------------
+def verify_doctor_authorization(connection, doctor_id):
+    """
+    Determines and verifies the authenticated doctor.
+    Derives authenticated doctor identity from:
+    1. Header: X-Doctor-Id, Doctor-Id, X-Authenticated-Doctor-Id
+    2. Header: Authorization: Bearer <id>
+    3. Query param / JSON body: auth_doctor_id
+
+    Returns (doctor_row, None) if authorized, or (None, (error_response, status_code)).
+    """
+    auth_header = (
+        request.headers.get("X-Doctor-Id")
+        or request.headers.get("Doctor-Id")
+        or request.headers.get("X-Authenticated-Doctor-Id")
+    )
+    if not auth_header:
+        bearer = request.headers.get("Authorization", "")
+        if bearer.startswith("Bearer "):
+            auth_header = bearer[7:].strip()
+    if not auth_header:
+        auth_header = request.args.get("auth_doctor_id") or (
+            request.get_json(silent=True) or {}
+        ).get("auth_doctor_id")
+
+    if not auth_header:
+        return None, (jsonify({"error": "Authentication required. Please log in as a doctor."}), 401)
+
+    try:
+        auth_doctor_id = int(auth_header)
+    except (TypeError, ValueError):
+        return None, (jsonify({"error": "Invalid doctor authentication credential"}), 401)
+
+    if auth_doctor_id != doctor_id:
+        return None, (jsonify({"error": "Access denied. You are not authorized to access another doctor's data."}), 403)
+
+    doctor = connection.execute(
+        "SELECT doctor_id, name, status FROM DOCTOR WHERE doctor_id = ?",
+        (auth_doctor_id,),
+    ).fetchone()
+
+    if not doctor:
+        return None, (jsonify({"error": "Doctor not found"}), 404)
+    if doctor["status"] != "Active":
+        return None, (jsonify({"error": "Doctor account is inactive"}), 403)
+
+    return doctor, None
+
+
+# --------------------------------
 # DOCTOR DASHBOARD STATS
 # --------------------------------
 @doctor_bp.route("/<int:doctor_id>/dashboard-stats", methods=["GET"])
@@ -816,15 +867,9 @@ def get_doctor_dashboard_stats(doctor_id):
     connection = get_db_connection()
 
     try:
-        doctor = connection.execute(
-            "SELECT doctor_id, name, specialization FROM DOCTOR WHERE doctor_id = ?",
-            (doctor_id,)
-        ).fetchone()
-
-        if not doctor:
-            return jsonify({
-                "error": "Doctor not found"
-            }), 404
+        doctor, err_response = verify_doctor_authorization(connection, doctor_id)
+        if err_response:
+            return err_response
 
         # Today's appointments count
         today_count = connection.execute(
@@ -850,12 +895,13 @@ def get_doctor_dashboard_stats(doctor_id):
             (doctor_id,)
         ).fetchone()["total"]
 
-        # Total distinct patients
+        # Total distinct patients (only counting active/completed appointments)
         total_patients = connection.execute(
             """
-            SELECT COUNT(DISTINCT patient_id) AS total
-            FROM APPOINTMENT
-            WHERE doctor_id = ?
+            SELECT COUNT(DISTINCT a.patient_id) AS total
+            FROM APPOINTMENT a
+            WHERE a.doctor_id = ?
+              AND a.status <> 'Cancelled'
             """,
             (doctor_id,)
         ).fetchone()["total"]
@@ -882,13 +928,13 @@ def get_doctor_dashboard_stats(doctor_id):
                 a.appointment_time,
                 a.status,
                 a.reason,
-                a.doctor_notes,
                 p.name AS patient_name,
                 p.phone AS patient_phone
             FROM APPOINTMENT a
             JOIN PATIENT p ON a.patient_id = p.patient_id
             WHERE a.doctor_id = ?
               AND a.appointment_date = DATE('now')
+              AND a.status <> 'Cancelled'
             ORDER BY a.appointment_time ASC
             """,
             (doctor_id,)
@@ -905,14 +951,13 @@ def get_doctor_dashboard_stats(doctor_id):
                 a.appointment_time,
                 a.status,
                 a.reason,
-                a.doctor_notes,
                 p.name AS patient_name,
                 p.phone AS patient_phone
             FROM APPOINTMENT a
             JOIN PATIENT p ON a.patient_id = p.patient_id
             WHERE a.doctor_id = ?
               AND a.appointment_date >= DATE('now')
-              AND a.status <> 'Cancelled'
+              AND a.status NOT IN ('Completed', 'Cancelled')
             ORDER BY a.appointment_date ASC, a.appointment_time ASC
             LIMIT 5
             """,
@@ -942,6 +987,10 @@ def get_doctor_appointments(doctor_id):
     connection = get_db_connection()
 
     try:
+        doctor, err_response = verify_doctor_authorization(connection, doctor_id)
+        if err_response:
+            return err_response
+
         appointments = connection.execute(
             """
             SELECT
@@ -1018,6 +1067,10 @@ def update_doctor_appointment(doctor_id, appointment_id):
     connection = get_db_connection()
 
     try:
+        doctor, err_response = verify_doctor_authorization(connection, doctor_id)
+        if err_response:
+            return err_response
+
         appointment = connection.execute(
             """
             SELECT appointment_id
@@ -1040,15 +1093,6 @@ def update_doctor_appointment(doctor_id, appointment_id):
             """,
             [*updates.values(), appointment_id, doctor_id]
         )
-
-        pregnancy_updates = {}
-        if "status" in updates:
-            pregnancy_updates["status"] = patient_status_from_central(updates["status"])
-        for key in ("doctor_notes", "diagnosis", "tests_recommended", "follow_up_date", "next_appointment", "reason"):
-            if key in updates:
-                pregnancy_updates[key] = updates[key]
-        sync_linked_pregnancy_appointment(connection, appointment_id, pregnancy_updates)
-
         connection.commit()
 
         updated = connection.execute(
@@ -1096,6 +1140,10 @@ def get_doctor_patients(doctor_id):
     connection = get_db_connection()
 
     try:
+        doctor, err_response = verify_doctor_authorization(connection, doctor_id)
+        if err_response:
+            return err_response
+
         patients = connection.execute(
             """
             SELECT
@@ -1111,6 +1159,7 @@ def get_doctor_patients(doctor_id):
             FROM PATIENT p
             JOIN APPOINTMENT a ON p.patient_id = a.patient_id
             WHERE a.doctor_id = ?
+              AND a.status <> 'Cancelled'
             GROUP BY p.patient_id
             ORDER BY last_appointment_date DESC
             """,
@@ -1133,23 +1182,11 @@ def get_doctor_patient_detail(doctor_id, patient_id):
     connection = get_db_connection()
 
     try:
-        # Verify doctor is connected to this patient through at least one appointment
-        is_connected = connection.execute(
-            """
-            SELECT 1
-            FROM APPOINTMENT
-            WHERE doctor_id = ? AND patient_id = ?
-            LIMIT 1
-            """,
-            (doctor_id, patient_id)
-        ).fetchone()
+        doctor, err_response = verify_doctor_authorization(connection, doctor_id)
+        if err_response:
+            return err_response
 
-        if not is_connected:
-            return jsonify({
-                "error": "Access denied. Patient is not associated with this doctor."
-            }), 403
-
-        # Patient basic details
+        # Check if patient exists first
         patient = connection.execute(
             """
             SELECT
@@ -1170,6 +1207,24 @@ def get_doctor_patient_detail(doctor_id, patient_id):
             return jsonify({
                 "error": "Patient not found"
             }), 404
+
+        # Verify doctor is connected to this patient through at least one active/completed appointment
+        is_connected = connection.execute(
+            """
+            SELECT 1
+            FROM APPOINTMENT
+            WHERE doctor_id = ?
+              AND patient_id = ?
+              AND status <> 'Cancelled'
+            LIMIT 1
+            """,
+            (doctor_id, patient_id)
+        ).fetchone()
+
+        if not is_connected:
+            return jsonify({
+                "error": "Access denied. Patient is not associated with this doctor."
+            }), 403
 
         # Active pregnancy info if any
         pregnancy = connection.execute(
@@ -1196,7 +1251,11 @@ def get_doctor_patient_detail(doctor_id, patient_id):
                 appointment_time,
                 status,
                 reason,
-                doctor_notes
+                doctor_notes,
+                diagnosis,
+                tests_recommended,
+                follow_up_date,
+                next_appointment
             FROM APPOINTMENT
             WHERE doctor_id = ? AND patient_id = ?
             ORDER BY appointment_date DESC, appointment_time DESC
@@ -1243,12 +1302,31 @@ def get_doctor_patient_detail(doctor_id, patient_id):
             (patient_id, doctor_id)
         ).fetchall()
 
+        # Reports for this patient
+        reports = connection.execute(
+            """
+            SELECT
+                report_id,
+                report_title,
+                report_type,
+                report_date,
+                file_path,
+                notes,
+                uploaded_at
+            FROM REPORT
+            WHERE patient_id = ?
+            ORDER BY report_date DESC
+            """,
+            (patient_id,)
+        ).fetchall()
+
         return jsonify({
             "patient": dict(patient),
             "pregnancy": dict(pregnancy) if pregnancy else None,
             "appointments": [dict(a) for a in appointments],
             "health_logs": [dict(h) for h in health_logs],
-            "medications": [dict(m) for m in medications]
+            "medications": [dict(m) for m in medications],
+            "reports": [dict(r) for r in reports]
         }), 200
 
     finally:
@@ -1333,26 +1411,6 @@ def parse_slot_list(raw_slots):
     return unique_slots
 
 
-def patient_status_from_central(status):
-    if status == "Completed":
-        return "Completed"
-    if status == "Cancelled":
-        return "Cancelled"
-    return "Upcoming"
-
-
-def sync_linked_pregnancy_appointment(connection, central_appointment_id, updates):
-    if not central_appointment_id or not updates:
-        return
-    assignments = ", ".join(f"{key} = ?" for key in updates)
-    connection.execute(
-        f"""
-        UPDATE PREGNANCY_APPOINTMENT
-        SET {assignments}
-        WHERE central_appointment_id = ?
-        """,
-        [*updates.values(), central_appointment_id],
-    )
 
 
 @doctor_bp.route("/<int:doctor_id>/schedule", methods=["GET"])

@@ -11,6 +11,7 @@ care_bp = Blueprint("care", __name__, url_prefix="/api")
 
 
 def patient_id_for(connection, user_id):
+    """Resolve patient_id from user_id."""
     try:
         user_id = int(user_id)
     except (TypeError, ValueError):
@@ -22,11 +23,15 @@ def patient_id_for(connection, user_id):
 
 
 def request_patient_id(connection, source):
-    user_id = source.get("user_id", type=int) if hasattr(source, "get") else None
+    """Extract user_id or userId from query params or request dict and resolve patient_id."""
+    user_id = None
+    if hasattr(source, "get"):
+        user_id = source.get("user_id") or source.get("userId")
     return patient_id_for(connection, user_id) if user_id else None
 
 
 def parse_slots(raw_slots):
+    """Parse time slot string (JSON array or comma-separated) into a list of strings."""
     if not raw_slots:
         return []
     try:
@@ -39,10 +44,12 @@ def parse_slots(raw_slots):
 
 
 def normalized_slot(slot):
+    """Normalize slot string for whitespace- and case-insensitive comparison."""
     return " ".join(str(slot or "").strip().upper().split())
 
 
 def configured_slot_for(connection, doctor_id, appointment_date, requested_slot):
+    """Verify and return the canonical slot from DOCTOR_AVAILABLE_DATE if configured."""
     row = connection.execute(
         """
         SELECT time_slots
@@ -64,152 +71,279 @@ def configured_slot_for(connection, doctor_id, appointment_date, requested_slot)
     )
 
 
-def user_appointment_from_row(row):
-    appointment = dict(row)
-    central_status = appointment.pop("central_status", None)
-    central_reason = appointment.pop("central_reason", None)
-    central_doctor_notes = appointment.pop("central_doctor_notes", None)
-    central_diagnosis = appointment.pop("central_diagnosis", None)
-    central_tests = appointment.pop("central_tests_recommended", None)
-    central_follow_up = appointment.pop("central_follow_up_date", None)
-    central_next = appointment.pop("central_next_appointment", None)
-    if central_status:
-        # Pending is the internal doctor-workflow state; patients see it as
-        # an upcoming appointment until the doctor confirms it.
-        if central_status == "Pending":
-            appointment["status"] = "Upcoming"
-        elif central_status == "Confirmed":
-            appointment["status"] = "Upcoming"
-        else:
-            appointment["status"] = central_status
-        appointment["doctor_status"] = central_status
-    if central_reason and not appointment.get("reason"):
-        appointment["reason"] = central_reason
-    if central_doctor_notes:
-        appointment["doctor_notes"] = central_doctor_notes
-    if central_diagnosis:
-        appointment["diagnosis"] = central_diagnosis
-    if central_tests:
-        appointment["tests_recommended"] = central_tests
-    if central_follow_up:
-        appointment["follow_up_date"] = central_follow_up
-    if central_next:
-        appointment["next_appointment"] = central_next
-    return appointment
-
-
+# =========================================================
+# 1. GET /api/appointments
+# =========================================================
 @care_bp.route("/appointments", methods=["GET"])
 def list_appointments():
     connection = get_db_connection()
     try:
         patient_id = request_patient_id(connection, request.args)
         if not patient_id:
-            return jsonify({"error": "A valid user_id is required"}), 400
+            # If user_id wasn't provided or patient doesn't exist yet
+            user_id = request.args.get("user_id") or request.args.get("userId")
+            if not user_id:
+                return jsonify({"error": "A valid user_id is required"}), 400
+            return jsonify({"appointments": []}), 200
 
         records = connection.execute(
             """
             SELECT
-                pa.*,
-                d.name AS linked_doctor_name,
-                d.practice_at AS linked_clinic_name,
-                d.specialization AS linked_specialization,
-                d.consultation_fee AS linked_consultation_fee,
-                d.phone AS linked_doctor_phone,
-                a.status AS central_status,
-                a.reason AS central_reason,
-                a.doctor_notes AS central_doctor_notes,
-                a.diagnosis AS central_diagnosis,
-                a.tests_recommended AS central_tests_recommended,
-                a.follow_up_date AS central_follow_up_date,
-                a.next_appointment AS central_next_appointment
-            FROM PREGNANCY_APPOINTMENT pa
-            LEFT JOIN DOCTOR d ON d.doctor_id = pa.doctor_id
-            LEFT JOIN APPOINTMENT a ON a.appointment_id = pa.central_appointment_id
-            WHERE pa.patient_id = ?
-            ORDER BY pa.appointment_date ASC, pa.appointment_time ASC, pa.appointment_id ASC
+                a.appointment_id,
+                a.patient_id,
+                a.doctor_id,
+                a.booked_by,
+                a.appointment_type,
+                a.appointment_date,
+                a.appointment_time,
+                a.status,
+                a.reason,
+                a.doctor_notes,
+                a.diagnosis,
+                a.tests_recommended,
+                a.follow_up_date,
+                a.next_appointment,
+                d.name AS doctor_name,
+                d.practice_at AS clinic_name,
+                d.specialization,
+                d.consultation_fee,
+                d.phone AS doctor_phone
+            FROM APPOINTMENT a
+            LEFT JOIN DOCTOR d ON a.doctor_id = d.doctor_id
+            WHERE a.patient_id = ?
+            ORDER BY a.appointment_date ASC, a.appointment_time ASC, a.appointment_id ASC
             """,
             (patient_id,),
         ).fetchall()
 
-        appointments = []
-        for record in records:
-            item = user_appointment_from_row(record)
-            if item.get("linked_doctor_name"):
-                item["doctor_name"] = item["linked_doctor_name"]
-            if item.get("linked_clinic_name"):
-                item["clinic_name"] = item["linked_clinic_name"]
-            item["specialization"] = item.pop("linked_specialization", None)
-            item["consultation_fee"] = item.pop("linked_consultation_fee", None)
-            item["doctor_phone"] = item.pop("linked_doctor_phone", None)
-            item.pop("linked_doctor_name", None)
-            item.pop("linked_clinic_name", None)
-            appointments.append(item)
+        appointments = [dict(record) for record in records]
         return jsonify({"appointments": appointments}), 200
     finally:
         connection.close()
 
 
+# =========================================================
+# 2. POST /api/appointments
+# =========================================================
+@care_bp.route("/api/appointments", methods=["POST"])  # Handles both prefixes if needed
 @care_bp.route("/appointments", methods=["POST"])
 def create_appointment():
     data = request.get_json() or {}
-    required = ("user_id", "appointment_date", "appointment_type")
-    if any(not data.get(field) for field in required):
-        return jsonify({"error": "user_id, appointment date, and appointment type are required"}), 400
+    user_id = data.get("user_id") or data.get("userId")
+    doctor_id = data.get("doctor_id")
+    appointment_date_raw = data.get("appointment_date") or data.get("appointmentDate")
+    appointment_time_raw = data.get("appointment_time") or data.get("appointmentTime")
+    appointment_type = str(data.get("appointment_type") or data.get("appointmentType") or "").strip()
+    reason = str(data.get("reason") or "").strip()
+
+    if not user_id or not doctor_id or not appointment_date_raw or not appointment_time_raw or not appointment_type:
+        return jsonify({
+            "error": "user_id, doctor_id, appointment_date, appointment_time, and appointment_type are required"
+        }), 400
 
     try:
-        appointment_date = date.fromisoformat(str(data["appointment_date"]))
-    except (TypeError, ValueError):
-        return jsonify({"error": "Invalid appointment date"}), 400
-    if appointment_date < date.today():
-        return jsonify({"error": "Appointment date cannot be in the past"}), 400
-
-    try:
-        user_id = int(data["user_id"])
+        user_id = int(user_id)
     except (TypeError, ValueError):
         return jsonify({"error": "A valid numeric user_id is required"}), 400
 
-    doctor_id = data.get("doctor_id")
-    if doctor_id not in (None, ""):
-        try:
-            doctor_id = int(doctor_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "A valid doctor_id is required"}), 400
-    else:
-        doctor_id = None
+    try:
+        doctor_id = int(doctor_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "A valid numeric doctor_id is required"}), 400
 
-    appointment_type = str(data.get("appointment_type") or "").strip()
-    appointment_time = str(data.get("appointment_time") or "").strip()
-    if doctor_id and not appointment_time:
-        return jsonify({"error": "Please select an available time slot"}), 400
+    try:
+        appointment_date = date.fromisoformat(str(appointment_date_raw).strip())
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid appointment date format. Use YYYY-MM-DD"}), 400
+
+    if appointment_date < date.today():
+        return jsonify({"error": "Appointment date cannot be in the past"}), 400
+
+    connection = get_db_connection()
+    try:
+        # 1. Verify Patient
+        patient_id = patient_id_for(connection, user_id)
+        if not patient_id:
+            return jsonify({
+                "error": "Patient record not found. Please complete profile/patient setup first."
+            }), 404
+
+        # 2. Verify Doctor
+        doctor = connection.execute(
+            """
+            SELECT doctor_id, name, practice_at, specialization, consultation_fee, status
+            FROM DOCTOR
+            WHERE doctor_id = ? AND status = 'Active'
+            """,
+            (doctor_id,),
+        ).fetchone()
+        if not doctor:
+            return jsonify({"error": "The selected doctor is not available"}), 400
+
+        # 3. Verify Slot in DOCTOR_AVAILABLE_DATE
+        appointment_date_str = appointment_date.isoformat()
+        configured_slot = configured_slot_for(
+            connection, doctor_id, appointment_date_str, appointment_time_raw
+        )
+        if not configured_slot:
+            return jsonify({
+                "error": "That date or time slot is no longer available. Please choose an open slot."
+            }), 409
+
+        appointment_time = configured_slot
+
+        # 4. Double booking check in APPOINTMENT
+        existing_booking = connection.execute(
+            """
+            SELECT appointment_id
+            FROM APPOINTMENT
+            WHERE doctor_id = ?
+              AND appointment_date = ?
+              AND appointment_time = ?
+              AND status <> 'Cancelled'
+            """,
+            (doctor_id, appointment_date_str, appointment_time),
+        ).fetchone()
+        if existing_booking:
+            return jsonify({
+                "error": "This appointment slot has just been booked by another patient.",
+                "message": "This appointment slot has just been booked by another patient."
+            }), 409
+
+        # 5. Insert directly into APPOINTMENT (protected by partial unique index)
+        cursor = connection.execute(
+            """
+            INSERT INTO APPOINTMENT (
+                patient_id,
+                doctor_id,
+                booked_by,
+                appointment_type,
+                appointment_date,
+                appointment_time,
+                status,
+                reason
+            ) VALUES (?, ?, ?, ?, ?, ?, 'Pending', ?)
+            """,
+            (
+                patient_id,
+                doctor_id,
+                user_id,
+                appointment_type,
+                appointment_date_str,
+                appointment_time,
+                reason,
+            ),
+        )
+        appointment_id = cursor.lastrowid
+        connection.commit()
+
+        return jsonify({
+            "message": "Appointment booked successfully",
+            "appointment_id": appointment_id,
+            "appointment": {
+                "appointment_id": appointment_id,
+                "patient_id": patient_id,
+                "doctor_id": doctor_id,
+                "booked_by": user_id,
+                "appointment_type": appointment_type,
+                "appointment_date": appointment_date_str,
+                "appointment_time": appointment_time,
+                "status": "Pending",
+                "reason": reason,
+                "doctor_name": doctor["name"],
+                "clinic_name": doctor["practice_at"],
+                "specialization": doctor["specialization"],
+                "consultation_fee": doctor["consultation_fee"],
+            },
+        }), 201
+
+    except sqlite3.IntegrityError as err:
+        connection.rollback()
+        err_msg = str(err).upper()
+        if "UNIQUE" in err_msg or "APPOINTMENT" in err_msg:
+            return jsonify({
+                "error": "This appointment slot has just been booked by another patient.",
+                "message": "This appointment slot has just been booked by another patient."
+            }), 409
+        return jsonify({"error": "The appointment could not be saved"}), 400
+    except Exception as err:
+        connection.rollback()
+        return jsonify({"error": f"The appointment could not be saved: {str(err)}"}), 500
+    finally:
+        connection.close()
+
+
+# =========================================================
+# 3. PUT /api/appointments/<appointment_id>
+# =========================================================
+@care_bp.route("/appointments/<int:appointment_id>", methods=["PUT"])
+def update_appointment(appointment_id):
+    data = request.get_json() or {}
+    user_id = data.get("user_id") or data.get("userId")
+    if not user_id:
+        return jsonify({"error": "A valid user_id is required"}), 400
 
     connection = get_db_connection()
     try:
         patient_id = patient_id_for(connection, user_id)
         if not patient_id:
-            return jsonify({"error": "Patient record not found. Please complete profile/patient setup first."}), 404
+            return jsonify({"error": "Patient not found"}), 404
 
-        doctor = None
-        central_appointment_id = None
-        if doctor_id:
+        # Check existing appointment and ownership
+        existing = connection.execute(
+            """
+            SELECT *
+            FROM APPOINTMENT
+            WHERE appointment_id = ? AND patient_id = ?
+            """,
+            (appointment_id, patient_id),
+        ).fetchone()
+        if not existing:
+            return jsonify({"error": "Appointment not found or unauthorized"}), 404
+
+        updates = {}
+        # If doctor, date, or time changes, re-validate availability
+        target_doctor_id = data.get("doctor_id", existing["doctor_id"])
+        target_date_raw = data.get("appointment_date", existing["appointment_date"])
+        target_time_raw = data.get("appointment_time", existing["appointment_time"])
+
+        if (
+            target_doctor_id != existing["doctor_id"]
+            or str(target_date_raw) != str(existing["appointment_date"])
+            or str(target_time_raw) != str(existing["appointment_time"])
+        ):
+            try:
+                target_doctor_id = int(target_doctor_id)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid doctor_id"}), 400
+
+            try:
+                target_date = date.fromisoformat(str(target_date_raw).strip())
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid appointment date format"}), 400
+
+            if target_date < date.today():
+                return jsonify({"error": "Appointment date cannot be in the past"}), 400
+
             doctor = connection.execute(
-                """
-                SELECT doctor_id, name, practice_at
-                FROM DOCTOR
-                WHERE doctor_id = ? AND status = 'Active'
-                """,
-                (doctor_id,),
+                "SELECT doctor_id FROM DOCTOR WHERE doctor_id = ? AND status = 'Active'",
+                (target_doctor_id,),
             ).fetchone()
             if not doctor:
-                return jsonify({"error": "The selected doctor is not available"}), 400
+                return jsonify({"error": "Selected doctor is not available"}), 400
 
             configured_slot = configured_slot_for(
-                connection, doctor_id, appointment_date.isoformat(), appointment_time
+                connection, target_doctor_id, target_date.isoformat(), target_time_raw
             )
             if not configured_slot:
-                return jsonify({"error": "That date or time slot is no longer available. Please choose an open slot."}), 409
-            appointment_time = configured_slot
+                return jsonify({
+                    "error": "The requested date or time slot is not available in doctor's schedule"
+                }), 409
 
-            existing_booking = connection.execute(
+            target_time = configured_slot
+
+            # Check if another non-cancelled appointment holds this slot
+            conflict = connection.execute(
                 """
                 SELECT appointment_id
                 FROM APPOINTMENT
@@ -217,181 +351,93 @@ def create_appointment():
                   AND appointment_date = ?
                   AND appointment_time = ?
                   AND status <> 'Cancelled'
+                  AND appointment_id <> ?
                 """,
-                (doctor_id, appointment_date.isoformat(), appointment_time),
+                (target_doctor_id, target_date.isoformat(), target_time, appointment_id),
             ).fetchone()
-            if existing_booking:
-                return jsonify({"error": f"The slot {appointment_time} on {appointment_date} is already booked. Please choose another slot."}), 409
+            if conflict:
+                return jsonify({
+                    "error": f"The slot {target_time} on {target_date.isoformat()} is already booked."
+                }), 409
 
-            central_cursor = connection.execute(
-                """
-                INSERT INTO APPOINTMENT (
-                    patient_id, doctor_id, booked_by, appointment_type,
-                    appointment_date, appointment_time, status, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, 'Pending', ?)
-                """,
-                (
-                    patient_id,
-                    doctor_id,
-                    user_id,
-                    appointment_type,
-                    appointment_date.isoformat(),
-                    appointment_time,
-                    data.get("reason") or "",
-                ),
-            )
-            central_appointment_id = central_cursor.lastrowid
+            updates["doctor_id"] = target_doctor_id
+            updates["appointment_date"] = target_date.isoformat()
+            updates["appointment_time"] = target_time
 
-        reminder_enabled = 1 if data.get("reminder_enabled") in (1, True, "1") else 0
-        fields = (
-            "doctor_id",
-            "central_appointment_id",
-            "appointment_date",
-            "appointment_time",
-            "doctor_name",
-            "clinic_name",
-            "appointment_type",
-            "reason",
-            "questions",
-            "status",
-            "follow_up_date",
-            "reminder_enabled",
-            "doctor_notes",
-            "diagnosis",
-            "tests_recommended",
-            "next_appointment",
-        )
-        values = [
-            doctor_id,
-            central_appointment_id,
-            appointment_date.isoformat(),
-            appointment_time or None,
-            doctor["name"] if doctor else data.get("doctor_name"),
-            doctor["practice_at"] if doctor else data.get("clinic_name"),
-            appointment_type,
-            data.get("reason"),
-            data.get("questions"),
-            "Upcoming",
-            data.get("follow_up_date"),
-            reminder_enabled,
-            data.get("doctor_notes"),
-            data.get("diagnosis"),
-            data.get("tests_recommended"),
-            data.get("next_appointment"),
-        ]
-        cursor = connection.execute(
-            f"INSERT INTO PREGNANCY_APPOINTMENT (patient_id, {', '.join(fields)}) "
-            f"VALUES ({', '.join(['?'] * (len(fields) + 1))})",
-            [patient_id, *values],
-        )
-        pregnancy_appointment_id = cursor.lastrowid
-        connection.commit()
-        return jsonify(
-            {
-                "message": "Appointment booked successfully",
-                "appointment_id": pregnancy_appointment_id,
-                "appointment": {
-                    "appointment_id": pregnancy_appointment_id,
-                    "doctor_id": doctor_id,
-                    "doctor_name": doctor["name"] if doctor else data.get("doctor_name"),
-                    "clinic_name": doctor["practice_at"] if doctor else data.get("clinic_name"),
-                    "appointment_date": appointment_date.isoformat(),
-                    "appointment_time": appointment_time or None,
-                    "appointment_type": appointment_type,
-                    "reason": data.get("reason"),
-                    "status": "Upcoming",
-                    "reminder_enabled": reminder_enabled,
-                },
-            }
-        ), 201
-    except sqlite3.IntegrityError as err:
-        connection.rollback()
-        if "APPOINTMENT" in str(err).upper() or "UNIQUE" in str(err).upper():
-            return jsonify({"error": "That appointment slot has just been booked. Please choose another slot."}), 409
-        return jsonify({"error": "The appointment could not be saved"}), 400
-    except Exception:
-        connection.rollback()
-        return jsonify({"error": "The appointment could not be saved"}), 500
-    finally:
-        connection.close()
+        if "appointment_type" in data:
+            updates["appointment_type"] = str(data["appointment_type"]).strip()
+        if "reason" in data:
+            updates["reason"] = str(data["reason"]).strip()
 
-
-@care_bp.route("/appointments/<int:appointment_id>", methods=["PUT"])
-def update_appointment(appointment_id):
-    data = request.get_json() or {}
-    connection = get_db_connection()
-    try:
-        patient_id = patient_id_for(connection, data.get("user_id"))
-        if not patient_id:
-            return jsonify({"error": "A valid user_id is required"}), 400
-        allowed = (
-            "appointment_date",
-            "appointment_time",
-            "doctor_name",
-            "clinic_name",
-            "appointment_type",
-            "reason",
-            "questions",
-            "status",
-            "follow_up_date",
-            "reminder_enabled",
-            "doctor_notes",
-            "diagnosis",
-            "tests_recommended",
-            "next_appointment",
-        )
-        updates = {key: data[key] for key in allowed if key in data}
-        if "appointment_date" in updates:
-            try:
-                if date.fromisoformat(updates["appointment_date"]) < date.today():
-                    return jsonify({"error": "Appointment date cannot be in the past"}), 400
-            except (TypeError, ValueError):
-                return jsonify({"error": "Invalid appointment date"}), 400
         if not updates:
-            return jsonify({"error": "No appointment fields provided"}), 400
-        cursor = connection.execute(
-            f"UPDATE PREGNANCY_APPOINTMENT SET {', '.join(f'{key} = ?' for key in updates)} WHERE appointment_id = ? AND patient_id = ?",
+            return jsonify({"error": "No valid appointment fields provided to update"}), 400
+
+        set_clauses = ", ".join(f"{key} = ?" for key in updates)
+        connection.execute(
+            f"UPDATE APPOINTMENT SET {set_clauses} WHERE appointment_id = ? AND patient_id = ?",
             [*updates.values(), appointment_id, patient_id],
         )
         connection.commit()
-        if not cursor.rowcount:
-            return jsonify({"error": "Appointment not found"}), 404
-        return jsonify({"message": "Appointment updated"}), 200
+
+        updated_apt = connection.execute(
+            """
+            SELECT
+                a.*,
+                d.name AS doctor_name,
+                d.practice_at AS clinic_name,
+                d.specialization,
+                d.consultation_fee
+            FROM APPOINTMENT a
+            LEFT JOIN DOCTOR d ON a.doctor_id = d.doctor_id
+            WHERE a.appointment_id = ?
+            """,
+            (appointment_id,),
+        ).fetchone()
+
+        return jsonify({
+            "message": "Appointment updated successfully",
+            "appointment": dict(updated_apt) if updated_apt else None,
+        }), 200
+
+    except sqlite3.IntegrityError:
+        connection.rollback()
+        return jsonify({"error": "The slot is already booked by another appointment."}), 409
     finally:
         connection.close()
 
 
+# =========================================================
+# 4. DELETE /api/appointments/<appointment_id> (CANCEL)
+# =========================================================
 @care_bp.route("/appointments/<int:appointment_id>", methods=["DELETE"])
-def delete_appointment(appointment_id):
+def cancel_appointment(appointment_id):
     data = request.get_json(silent=True) or {}
-    user_id = data.get("user_id") or request.args.get("user_id", type=int)
+    user_id = data.get("user_id") or data.get("userId") or request.args.get("user_id") or request.args.get("userId")
+
     connection = get_db_connection()
     try:
         patient_id = patient_id_for(connection, user_id)
         if not patient_id:
             return jsonify({"error": "A valid user_id is required"}), 400
 
-        target_apt = connection.execute(
+        # Perform soft cancellation: status = 'Cancelled'
+        cursor = connection.execute(
             """
-            SELECT central_appointment_id
-            FROM PREGNANCY_APPOINTMENT
+            UPDATE APPOINTMENT
+            SET status = 'Cancelled'
             WHERE appointment_id = ? AND patient_id = ?
             """,
             (appointment_id, patient_id),
-        ).fetchone()
-        if not target_apt:
-            return jsonify({"error": "Appointment not found"}), 404
-
-        connection.execute(
-            "DELETE FROM PREGNANCY_APPOINTMENT WHERE appointment_id = ? AND patient_id = ?",
-            (appointment_id, patient_id),
         )
-        if target_apt["central_appointment_id"]:
-            connection.execute(
-                "UPDATE APPOINTMENT SET status = 'Cancelled' WHERE appointment_id = ? AND patient_id = ?",
-                (target_apt["central_appointment_id"], patient_id),
-            )
         connection.commit()
-        return jsonify({"message": "Appointment deleted"}), 200
+
+        if cursor.rowcount == 0:
+            return jsonify({"error": "Appointment not found or unauthorized"}), 404
+
+        return jsonify({
+            "message": "Appointment cancelled successfully",
+            "appointment_id": appointment_id,
+            "status": "Cancelled"
+        }), 200
     finally:
         connection.close()

@@ -30,7 +30,12 @@ function DoctorDashboard() {
   const fetchDashboardData = async (doctorId) => {
     try {
       const response = await fetch(
-        `http://127.0.0.1:5000/api/doctors/${doctorId}/dashboard-stats`
+        `http://127.0.0.1:5000/api/doctors/${doctorId}/dashboard-stats`,
+        {
+          headers: {
+            "X-Doctor-Id": String(doctorId),
+          },
+        }
       );
       const data = await response.json();
 
@@ -60,6 +65,7 @@ function DoctorDashboard() {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
+            "X-Doctor-Id": String(doctor.doctor_id),
           },
           body: JSON.stringify({ status: newStatus }),
         }

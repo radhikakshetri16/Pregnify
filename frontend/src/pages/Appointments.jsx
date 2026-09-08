@@ -5,7 +5,7 @@ import {
   Clock3,
   MapPin,
   Plus,
-  Trash2,
+  CalendarX,
   X,
   Lock,
   AlertCircle,
@@ -13,7 +13,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import CalendarPicker from "../components/CalendarPicker";
-import { dateKey, formatDisplayDate, localDateKey } from "../utils/dates";
+import { dateKey, localDateKey } from "../utils/dates";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000/api";
 const appointmentTypes = [
@@ -27,13 +27,10 @@ const appointmentTypes = [
 
 const blankForm = {
   doctor_id: "",
-  doctor_name: "",
-  clinic_name: "",
   appointment_date: "",
   appointment_time: "",
   appointment_type: "Routine check-up",
   reason: "",
-  reminder_enabled: false,
 };
 
 async function readApiResponse(response) {
@@ -63,10 +60,10 @@ function Appointments() {
   const [form, setForm] = useState(blankForm);
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -126,8 +123,6 @@ function Appointments() {
       setForm((prev) => ({
         ...prev,
         doctor_id: "",
-        doctor_name: "",
-        clinic_name: "",
         appointment_date: "",
         appointment_time: "",
       }));
@@ -141,8 +136,6 @@ function Appointments() {
     setForm((prev) => ({
       ...prev,
       doctor_id: selectedDoc.doctor_id,
-      doctor_name: selectedDoc.name,
-      clinic_name: selectedDoc.practice_at,
       appointment_date: "",
       appointment_time: "",
     }));
@@ -218,9 +211,12 @@ function Appointments() {
         if (!isMounted) return;
 
         if (!data.is_working_day) {
+          const selectedDoc = doctors.find(
+            (d) => String(d.doctor_id) === String(form.doctor_id)
+          );
           setSlotMessage(
             data.message ||
-              `Dr. ${form.doctor_name} is not available on this date.`
+              `Dr. ${selectedDoc?.name || "Doctor"} is not available on this date.`
           );
           setAvailableSlots([]);
           setForm((prev) => ({ ...prev, appointment_time: "" }));
@@ -245,13 +241,13 @@ function Appointments() {
     return () => {
       isMounted = false;
     };
-  }, [form.doctor_id, form.appointment_date]);
+  }, [form.doctor_id, form.appointment_date, doctors]);
 
   const handleChange = (event) => {
-    const { name, value, type, checked } = event.target;
+    const { name, value } = event.target;
     setForm((prev) => ({
       ...prev,
-      [name]: type === "checkbox" ? checked : value,
+      [name]: value,
     }));
   };
 
@@ -266,7 +262,7 @@ function Appointments() {
 
   const handleCloseModal = () => {
     setSelected(null);
-    setDeleteTarget(null);
+    setCancelTarget(null);
   };
 
   const handleSubmit = async (event) => {
@@ -295,7 +291,14 @@ function Appointments() {
         await fetch(`${API_BASE}/appointments`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...form, user_id: userId }),
+          body: JSON.stringify({
+            user_id: userId,
+            doctor_id: form.doctor_id,
+            appointment_date: form.appointment_date,
+            appointment_time: form.appointment_time,
+            appointment_type: form.appointment_type,
+            reason: form.reason,
+          }),
         })
       );
       setNotice("Appointment booked successfully!");
@@ -309,9 +312,9 @@ function Appointments() {
     }
   };
 
-  const handleDelete = async (target) => {
+  const handleCancel = async (target) => {
     if (!target) return;
-    setDeleting(true);
+    setCancelling(true);
     setError("");
     try {
       await readApiResponse(
@@ -322,14 +325,29 @@ function Appointments() {
           }
         )
       );
-       setNotice("Appointment deleted successfully.");
+      setNotice("Appointment cancelled successfully.");
       handleCloseModal();
       await loadAppointments();
       setTimeout(() => setNotice(""), 3500);
-    } catch (deleteError) {
-      setError(deleteError.message || "Unable to delete appointment.");
+    } catch (cancelError) {
+      setError(cancelError.message || "Unable to cancel appointment.");
     } finally {
-      setDeleting(false);
+      setCancelling(false);
+    }
+  };
+
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case "Completed":
+        return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      case "Confirmed":
+        return "bg-blue-50 text-blue-700 border-blue-200";
+      case "Pending":
+        return "bg-amber-50 text-amber-700 border-amber-200";
+      case "Cancelled":
+        return "bg-gray-100 text-gray-500 border-gray-200";
+      default:
+        return "bg-pink-50 text-pink-700 border-pink-200";
     }
   };
 
@@ -372,7 +390,7 @@ function Appointments() {
       )}
 
       {/* ========================================================= */}
-      {/* BOOK APPOINTMENT MODAL (BLUR BACKGROUND POPUP) */}
+      {/* BOOK APPOINTMENT MODAL */}
       {/* ========================================================= */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-md p-4 overflow-y-auto">
@@ -397,7 +415,7 @@ function Appointments() {
               </button>
             </div>
 
-             <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-5">
               {/* Doctor Selector */}
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1.5">
@@ -561,20 +579,6 @@ function Appointments() {
                 />
               </div>
 
-              {/* Reminder toggle */}
-              <div className="flex items-center">
-                <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-gray-700 font-medium">
-                  <input
-                    type="checkbox"
-                    name="reminder_enabled"
-                    checked={form.reminder_enabled}
-                    onChange={handleChange}
-                    className="h-4 w-4 rounded border-gray-300 text-pink-600 focus:ring-pink-500 cursor-pointer"
-                  />
-                  <span>Enable appointment notification reminder</span>
-                </label>
-              </div>
-
               {/* Actions Footer */}
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
                 <button
@@ -617,8 +621,7 @@ function Appointments() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {appointments.map((apt) => {
-            const isCompleted = apt.status === "Completed";
-            const isCancelled = apt.status === "Cancelled";
+            const canCancel = apt.status !== "Cancelled" && apt.status !== "Completed";
 
             return (
               <div
@@ -632,20 +635,16 @@ function Appointments() {
                     </span>
 
                     <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        isCompleted
-                          ? "bg-emerald-50 text-emerald-700"
-                          : isCancelled
-                          ? "bg-gray-100 text-gray-500"
-                          : "bg-pink-50 text-pink-700"
-                      }`}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getStatusBadge(
+                        apt.status
+                      )}`}
                     >
                       {apt.status}
                     </span>
                   </div>
 
                   <h3 className="text-sm font-bold text-gray-800 truncate">
-                    {apt.doctor_name || "Doctor Appointment"}
+                    {apt.doctor_name ? `Dr. ${apt.doctor_name}` : "Doctor Appointment"}
                   </h3>
 
                   <div className="mt-2 space-y-1 text-xs text-gray-500">
@@ -675,14 +674,16 @@ function Appointments() {
                     View Details <ChevronRight size={13} />
                   </button>
 
-                   <button
-                     type="button"
-                     onClick={() => setDeleteTarget(apt)}
-                     className="p-1 text-gray-400 hover:text-red-500 rounded-lg transition cursor-pointer"
-                     title="Delete appointment"
-                   >
-                     <Trash2 size={14} />
-                   </button>
+                  {canCancel && (
+                    <button
+                      type="button"
+                      onClick={() => setCancelTarget(apt)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                      title="Cancel appointment"
+                    >
+                      <CalendarX size={15} />
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -691,11 +692,11 @@ function Appointments() {
       )}
 
       {/* ========================================================= */}
-      {/* MINIMAL APPOINTMENT DETAIL MODAL */}
+      {/* APPOINTMENT DETAIL MODAL */}
       {/* ========================================================= */}
       {selected && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-md p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-gray-100">
               <h3 className="text-base font-bold text-gray-800">
                 Appointment Details
@@ -712,8 +713,16 @@ function Appointments() {
             <div className="space-y-3 text-xs">
               <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
                 <span className="text-gray-400">Doctor:</span>
-                <span className="font-semibold text-gray-800 text-right">{selected.doctor_name || "N/A"}</span>
+                <span className="font-semibold text-gray-800 text-right">
+                  {selected.doctor_name ? `Dr. ${selected.doctor_name}` : "N/A"}
+                </span>
               </div>
+              {selected.specialization && (
+                <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
+                  <span className="text-gray-400">Specialization:</span>
+                  <span className="font-semibold text-gray-800 text-right">{selected.specialization}</span>
+                </div>
+              )}
               <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
                 <span className="text-gray-400">Location:</span>
                 <span className="font-semibold text-gray-800 text-right">{selected.clinic_name || "N/A"}</span>
@@ -732,69 +741,69 @@ function Appointments() {
               </div>
               <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
                 <span className="text-gray-400">Status:</span>
-                <span className="font-semibold text-gray-800 text-right">{selected.status}</span>
-              </div>
-              <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
-                <span className="text-gray-400">Reminder:</span>
-                <span className="font-semibold text-gray-800 text-right">
-                  {selected.reminder_enabled ? "Enabled" : "Off"}
+                <span
+                  className={`font-semibold px-2 py-0.5 rounded-full border text-[11px] ${getStatusBadge(
+                    selected.status
+                  )}`}
+                >
+                  {selected.status}
                 </span>
               </div>
               {selected.reason && (
                 <div className="py-1 border-b border-gray-50">
                   <span className="text-gray-400 block mb-1">Reason:</span>
-                  <p className="text-gray-700 bg-gray-50 p-2 rounded-xl">{selected.reason}</p>
-                </div>
-              )}
-              {selected.questions && (
-                <div className="py-1 border-b border-gray-50">
-                  <span className="text-gray-400 block mb-1">Notes / questions:</span>
-                  <p className="text-gray-700 bg-gray-50 p-2 rounded-xl">{selected.questions}</p>
-                </div>
-              )}
-              {selected.follow_up_date && (
-                <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
-                  <span className="text-gray-400">Follow-up date:</span>
-                  <span className="font-semibold text-gray-800 text-right">{selected.follow_up_date}</span>
+                  <p className="text-gray-700 bg-gray-50 p-2.5 rounded-xl">{selected.reason}</p>
                 </div>
               )}
               {selected.doctor_notes && (
                 <div className="py-1 border-b border-gray-50">
-                  <span className="text-gray-400 block mb-1">Doctor&apos;s notes:</span>
-                  <p className="text-gray-700 bg-gray-50 p-2 rounded-xl">{selected.doctor_notes}</p>
+                  <span className="text-gray-400 block mb-1">Doctor&apos;s Notes:</span>
+                  <p className="text-gray-700 bg-emerald-50/60 border border-emerald-100 p-2.5 rounded-xl">
+                    {selected.doctor_notes}
+                  </p>
                 </div>
               )}
               {selected.diagnosis && (
                 <div className="py-1 border-b border-gray-50">
                   <span className="text-gray-400 block mb-1">Diagnosis:</span>
-                  <p className="text-gray-700 bg-gray-50 p-2 rounded-xl">{selected.diagnosis}</p>
+                  <p className="text-gray-700 bg-gray-50 p-2.5 rounded-xl">{selected.diagnosis}</p>
                 </div>
               )}
               {selected.tests_recommended && (
                 <div className="py-1 border-b border-gray-50">
-                  <span className="text-gray-400 block mb-1">Tests recommended:</span>
-                  <p className="text-gray-700 bg-gray-50 p-2 rounded-xl">{selected.tests_recommended}</p>
+                  <span className="text-gray-400 block mb-1">Tests Recommended:</span>
+                  <p className="text-gray-700 bg-gray-50 p-2.5 rounded-xl">{selected.tests_recommended}</p>
+                </div>
+              )}
+              {selected.follow_up_date && (
+                <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
+                  <span className="text-gray-400">Follow-up Date:</span>
+                  <span className="font-semibold text-gray-800 text-right">{selected.follow_up_date}</span>
                 </div>
               )}
               {selected.next_appointment && (
                 <div className="flex justify-between gap-4 py-1">
-                  <span className="text-gray-400">Next appointment:</span>
+                  <span className="text-gray-400">Next Appointment:</span>
                   <span className="font-semibold text-gray-800 text-right">{selected.next_appointment}</span>
                 </div>
               )}
             </div>
 
             <div className="mt-6 pt-3 border-t border-gray-100 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => {
-                  setDeleteTarget(selected);
-                  setSelected(null);
-                }}
-                className="text-xs font-semibold text-red-600 hover:text-red-700 flex items-center gap-1 cursor-pointer"
-              >
-                <Trash2 size={13} /> Delete Appointment
-              </button>
+              {selected.status !== "Cancelled" && selected.status !== "Completed" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCancelTarget(selected);
+                    setSelected(null);
+                  }}
+                  className="text-xs font-semibold text-red-600 hover:text-red-700 flex items-center gap-1.5 cursor-pointer py-1.5 px-2.5 rounded-lg hover:bg-red-50 transition"
+                >
+                  <CalendarX size={14} /> Cancel Appointment
+                </button>
+              ) : (
+                <div />
+              )}
               <button
                 type="button"
                 onClick={handleCloseModal}
@@ -807,32 +816,45 @@ function Appointments() {
         </div>
       )}
 
-      {/* Delete Confirmation */}
-      {deleteTarget && (
+      {/* ========================================================= */}
+      {/* CANCEL APPOINTMENT CONFIRMATION */}
+      {/* ========================================================= */}
+      {cancelTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-md p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-gray-100">
-            <h3 className="text-base font-bold text-gray-800">
-              Delete Appointment?
+            <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
+              <CalendarX className="text-red-600" size={20} />
+              Cancel Appointment?
             </h3>
             <p className="mt-2 text-xs leading-relaxed text-gray-600">
-              Are you sure you want to delete this appointment with {deleteTarget.doctor_name || "the selected doctor"}? The reserved time slot will be released back to other patients.
+              Are you sure you want to cancel your appointment with{" "}
+              <strong>
+                {cancelTarget.doctor_name
+                  ? `Dr. ${cancelTarget.doctor_name}`
+                  : "the selected doctor"}
+              </strong>{" "}
+              on <strong>{cancelTarget.appointment_date}</strong> at{" "}
+              <strong>{cancelTarget.appointment_time}</strong>?
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              The reserved time slot will be released back for other patients to book.
             </p>
             <div className="mt-5 flex justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() => setDeleteTarget(null)}
-                disabled={deleting}
+                onClick={() => setCancelTarget(null)}
+                disabled={cancelling}
                 className="rounded-xl border border-gray-200 px-3.5 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 transition cursor-pointer"
               >
-                Keep
+                Keep Appointment
               </button>
               <button
                 type="button"
-                onClick={() => handleDelete(deleteTarget)}
-                disabled={deleting}
-                className="rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 transition cursor-pointer"
+                onClick={() => handleCancel(cancelTarget)}
+                disabled={cancelling}
+                className="rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 transition cursor-pointer disabled:opacity-50"
               >
-                {deleting ? "Deleting..." : "Yes, Delete"}
+                {cancelling ? "Cancelling..." : "Yes, Cancel Appointment"}
               </button>
             </div>
           </div>
