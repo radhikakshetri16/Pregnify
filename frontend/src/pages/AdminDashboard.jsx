@@ -1,227 +1,187 @@
 import { useEffect, useState } from "react";
-import {
-  Users,
-  Stethoscope,
-  CalendarDays,
-  UserCheck,
-  UserX,
-  Clock,
-  CheckCircle2,
-  XCircle,
-} from "lucide-react";
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000/api";
+const DOCTOR_COLORS = ["#be185d", "#15803d", "#6d28d9", "#b45309", "#1d4ed8", "#0e7490", "#be123c"];
+const STATUS_COLORS = {
+  Pending: "#d97706",
+  Confirmed: "#2563eb",
+  Completed: "#16a34a",
+  Cancelled: "#e11d48",
+};
+
+const formatNpr = (value) => `NPR ${Number(value || 0).toLocaleString()}`;
 
 function AdminDashboard() {
   const admin = JSON.parse(localStorage.getItem("admin"));
-
   const [stats, setStats] = useState(null);
+  const [doctors, setDoctors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const fetchStats = async () => {
-    try {
-      const response = await fetch("http://127.0.0.1:5000/api/admin/stats");
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.error || "Unable to load system statistics.");
-        return;
-      }
-
-      setStats(data.stats);
-    } catch (err) {
-      console.error(err);
-      setError("Unable to connect to the server.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchStats();
+    const loadDashboard = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/admin/stats`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Unable to load dashboard.");
+        setStats(data.stats);
+        setDoctors(data.doctor_performance || []);
+      } catch (err) {
+        console.error(err);
+        setError(err.message || "Unable to connect to the server.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadDashboard();
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <p className="text-gray-500">
-          Loading system overview...
-        </p>
-      </div>
-    );
+    return <div className="min-h-[50vh] flex items-center justify-center text-sm text-gray-500">Loading dashboard...</div>;
   }
 
+  const totalScheduled = doctors.reduce((sum, doctor) => sum + doctor.scheduled_appointments, 0);
+  const totalEarnings = doctors.reduce((sum, doctor) => sum + Number(doctor.earnings || 0), 0);
+  const pieSegments = doctors.reduce((chart, doctor, index) => {
+    if (!doctor.scheduled_appointments) return chart;
+    const end = chart.end + (doctor.scheduled_appointments / totalScheduled) * 100;
+    return {
+      end,
+      segments: [...chart.segments, `${DOCTOR_COLORS[index % DOCTOR_COLORS.length]} ${chart.end}% ${end}%`],
+    };
+  }, { end: 0, segments: [] }).segments;
+  const pieBackground = pieSegments.length ? `conic-gradient(${pieSegments.join(", ")})` : "#e5e7eb";
+
+  const statuses = [
+    { label: "Pending", value: stats?.pending_appointments ?? 0 },
+    { label: "Confirmed", value: stats?.confirmed_appointments ?? 0 },
+    { label: "Completed", value: stats?.completed_appointments ?? 0 },
+    { label: "Cancelled", value: stats?.cancelled_appointments ?? 0 },
+  ];
+  const metrics = [
+    ["Users", stats?.total_users ?? 0],
+    ["Patients", stats?.total_patients ?? 0],
+    ["Doctors", stats?.total_doctors ?? 0],
+    ["Appointments", stats?.total_appointments ?? 0],
+  ];
+
   return (
-    <div className="max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-800">
-          Welcome, {admin?.name || "Administrator"}
-        </h1>
+    <div className="max-w-7xl mx-auto text-gray-800">
+      <header className="pb-4 border-b border-gray-200">
+        <h1 className="text-2xl font-semibold">Admin dashboard</h1>
+        <p className="text-sm text-gray-500 mt-1">Welcome back, {admin?.name || "Administrator"}.</p>
+      </header>
 
-        <p className="text-gray-500 mt-2">
-          Monitor system overview and administrative statistics.
-        </p>
+      {error && <div className="my-4 border-l-2 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+      <section className="grid grid-cols-2 lg:grid-cols-4 border-b border-gray-200">
+        {metrics.map(([label, value], index) => (
+          <div key={label} className={`py-4 ${index > 0 ? "pl-4 sm:pl-6 border-l border-gray-100" : ""}`}>
+            <p className="text-xs text-gray-500">{label}</p>
+            <p className="text-2xl font-semibold mt-1 tabular-nums">{value}</p>
+          </div>
+        ))}
+      </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_1fr] gap-8 py-6 border-b border-gray-200">
+        <section>
+          <div className="flex items-baseline justify-between gap-4 mb-5">
+            <div>
+              <h2 className="text-base font-semibold">Appointments by doctor</h2>
+              <p className="text-xs text-gray-500 mt-1">Non-cancelled appointments</p>
+            </div>
+            <span className="text-sm font-semibold tabular-nums">{totalScheduled} total</span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
+            <div className="relative h-36 w-36 shrink-0 rounded-full" style={{ background: pieBackground }} role="img" aria-label="Appointments distributed across doctors">
+              <div className="absolute inset-7 bg-white rounded-full flex items-center justify-center">
+                <span className="text-xl font-semibold tabular-nums">{totalScheduled}</span>
+              </div>
+            </div>
+            <div className="w-full divide-y divide-gray-100">
+              {doctors.map((doctor, index) => (
+                <div key={doctor.doctor_id} className="flex items-center justify-between gap-4 py-2 first:pt-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: DOCTOR_COLORS[index % DOCTOR_COLORS.length] }} />
+                    <span className="text-sm truncate">Dr. {doctor.name}</span>
+                  </div>
+                  <span className="text-sm font-medium tabular-nums">{doctor.scheduled_appointments}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="lg:border-l lg:border-gray-200 lg:pl-8">
+          <h2 className="text-base font-semibold">Appointment status</h2>
+          <p className="text-xs text-gray-500 mt-1 mb-5">All appointments in the system</p>
+
+          <div className="h-2 flex overflow-hidden bg-gray-100 mb-5">
+            {statuses.map((status) => (
+              <div
+                key={status.label}
+                style={{
+                  width: `${stats?.total_appointments ? (status.value / stats.total_appointments) * 100 : 0}%`,
+                  backgroundColor: STATUS_COLORS[status.label],
+                }}
+              />
+            ))}
+          </div>
+
+          <div className="divide-y divide-gray-100">
+            {statuses.map((status) => (
+              <div key={status.label} className="flex items-center justify-between py-2.5 first:pt-0">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: STATUS_COLORS[status.label] }} />
+                  <span className="text-sm text-gray-600">{status.label}</span>
+                </div>
+                <span className="text-sm font-semibold tabular-nums">{status.value}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
 
-      {error && (
-        <div className="mb-6 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* Main Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        {/* Total Users */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-pink-50 rounded-xl">
-              <Users className="text-pink-600" size={23} />
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Total Users</p>
-              <p className="text-2xl font-bold text-gray-800">
-                {stats?.total_users ?? 0}
-              </p>
-            </div>
+      <section className="pt-6">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-4">
+          <div>
+            <h2 className="text-base font-semibold">Doctor performance</h2>
+            <p className="text-xs text-gray-500 mt-1">Earnings are estimated from non-cancelled bookings.</p>
           </div>
+          <p className="text-sm text-gray-500">Total earnings <span className="ml-2 font-semibold text-gray-800">{formatNpr(totalEarnings)}</span></p>
         </div>
 
-        {/* Total Patients */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-purple-50 rounded-xl">
-              <Users className="text-purple-600" size={23} />
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Total Patients</p>
-              <p className="text-2xl font-bold text-gray-800">
-                {stats?.total_patients ?? 0}
-              </p>
-            </div>
-          </div>
+        <div className="overflow-x-auto border-t border-gray-200">
+          <table className="w-full min-w-[650px] text-left">
+            <thead>
+              <tr className="border-b border-gray-200 text-xs text-gray-500">
+                <th className="py-3 pr-4 font-medium">Doctor</th>
+                <th className="py-3 px-4 font-medium">Scheduled</th>
+                <th className="py-3 px-4 font-medium">Completed</th>
+                <th className="py-3 px-4 font-medium">Progress</th>
+                <th className="py-3 pl-4 font-medium text-right">Earnings</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {doctors.map((doctor) => (
+                <tr key={doctor.doctor_id} className="text-sm hover:bg-gray-50/70">
+                  <td className="py-3 pr-4"><p className="font-medium">Dr. {doctor.name}</p><p className="text-xs text-gray-400 mt-0.5">{doctor.specialization}</p></td>
+                  <td className="py-3 px-4 tabular-nums">{doctor.scheduled_appointments}</td>
+                  <td className="py-3 px-4 tabular-nums">{doctor.completed_appointments}</td>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-24 h-1.5 bg-gray-100 overflow-hidden"><div className="h-full bg-green-600" style={{ width: `${doctor.progress_percent}%` }} /></div>
+                      <span className="text-xs text-gray-500 tabular-nums">{doctor.completed_appointments}/{doctor.progress_goal}</span>
+                    </div>
+                  </td>
+                  <td className="py-3 pl-4 text-right font-medium tabular-nums">{formatNpr(doctor.earnings)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-
-        {/* Total Doctors */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-blue-50 rounded-xl">
-              <Stethoscope className="text-blue-600" size={23} />
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Total Doctors</p>
-              <p className="text-2xl font-bold text-gray-800">
-                {stats?.total_doctors ?? 0}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Total Appointments */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-green-50 rounded-xl">
-              <CalendarDays className="text-green-600" size={23} />
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Total Appointments</p>
-              <p className="text-2xl font-bold text-gray-800">
-                {stats?.total_appointments ?? 0}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Breakdown Summaries */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        {/* Doctor Summary */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-7">
-          <div className="flex items-center gap-3 mb-5">
-            <div className="p-3 bg-blue-50 rounded-xl">
-              <Stethoscope className="text-blue-600" size={22} />
-            </div>
-            <div>
-              <h2 className="font-semibold text-gray-800">
-                Doctor Overview
-              </h2>
-              <p className="text-sm text-gray-500">
-                Active and inactive doctor status
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between p-3.5 bg-gray-50 rounded-xl">
-              <div className="flex items-center gap-3">
-                <UserCheck className="text-green-600" size={18} />
-                <span className="text-sm text-gray-700">Active Doctors</span>
-              </div>
-              <span className="font-bold text-gray-800">
-                {stats?.active_doctors ?? 0}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between p-3.5 bg-gray-50 rounded-xl">
-              <div className="flex items-center gap-3">
-                <UserX className="text-gray-500" size={18} />
-                <span className="text-sm text-gray-700">Inactive Doctors</span>
-              </div>
-              <span className="font-bold text-gray-800">
-                {stats?.inactive_doctors ?? 0}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Appointment Summary */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-7">
-          <div className="flex items-center gap-3 mb-5">
-            <div className="p-3 bg-pink-50 rounded-xl">
-              <CalendarDays className="text-pink-600" size={22} />
-            </div>
-            <div>
-              <h2 className="font-semibold text-gray-800">
-                Appointment Overview
-              </h2>
-              <p className="text-sm text-gray-500">
-                Appointment statuses across system
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between p-3.5 bg-gray-50 rounded-xl">
-              <div className="flex items-center gap-3">
-                <Clock className="text-amber-600" size={18} />
-                <span className="text-sm text-gray-700">Pending</span>
-              </div>
-              <span className="font-bold text-gray-800">
-                {stats?.pending_appointments ?? 0}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between p-3.5 bg-gray-50 rounded-xl">
-              <div className="flex items-center gap-3">
-                <CheckCircle2 className="text-green-600" size={18} />
-                <span className="text-sm text-gray-700">Completed</span>
-              </div>
-              <span className="font-bold text-gray-800">
-                {stats?.completed_appointments ?? 0}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between p-3.5 bg-gray-50 rounded-xl">
-              <div className="flex items-center gap-3">
-                <XCircle className="text-red-500" size={18} />
-                <span className="text-sm text-gray-700">Cancelled</span>
-              </div>
-              <span className="font-bold text-gray-800">
-                {stats?.cancelled_appointments ?? 0}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }
