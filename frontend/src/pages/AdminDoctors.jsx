@@ -4,7 +4,6 @@ import {
   Plus,
   Search,
   CheckCircle2,
-  XCircle,
   Edit2,
   Trash2,
   Check,
@@ -46,6 +45,7 @@ function AdminDoctors() {
   const [successMsg, setSuccessMsg] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [selectedDoctor, setSelectedDoctor] = useState(null);
 
   // Registration Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -104,6 +104,8 @@ function AdminDoctors() {
   };
 
   useEffect(() => {
+    // The request only updates state after its asynchronous response resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchDoctors();
   }, []);
 
@@ -189,8 +191,10 @@ function AdminDoctors() {
           },
           body: JSON.stringify({
             name: editForm.name.trim(),
+            email: editForm.email.trim(),
             phone: editForm.phone?.trim() || "",
             specialization: editForm.specialization.trim(),
+            nmc_number: editForm.nmc_number.trim(),
             experience: Number(editForm.experience),
             practice_at: editForm.practice_at.trim(),
             consultation_fee: Number(editForm.consultation_fee),
@@ -479,13 +483,13 @@ function AdminDoctors() {
   return (
     <div className="max-w-6xl mx-auto">
       {/* Header */}
-      <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="mb-5 flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-4 border-b border-gray-200">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
+          <h1 className="text-2xl font-semibold text-gray-800">
             Doctors
           </h1>
           <p className="text-gray-500 mt-1 text-sm">
-            Register doctors and set their calendar schedule & time slots.
+            Manage doctor accounts, schedules, and performance.
           </p>
         </div>
 
@@ -496,7 +500,7 @@ function AdminDoctors() {
             setSuccessMsg("");
             setShowAddModal(true);
           }}
-          className="flex items-center gap-2 px-5 py-2.5 bg-pink-600 text-white rounded-xl font-semibold hover:bg-pink-700 transition cursor-pointer shadow-xs self-start sm:self-auto text-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg font-semibold hover:bg-pink-700 transition cursor-pointer self-start sm:self-auto text-sm"
         >
           <Plus size={18} />
           Register Doctor
@@ -518,7 +522,7 @@ function AdminDoctors() {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs p-4 mb-6 flex flex-col sm:flex-row gap-4 justify-between items-center">
+      <div className="bg-white border-b border-gray-200 pb-4 mb-4 flex flex-col sm:flex-row gap-4 justify-between items-center">
         {/* Search */}
         <div className="relative w-full sm:w-96">
           <Search
@@ -530,7 +534,7 @@ function AdminDoctors() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Search by name, specialization, NMC..."
-            className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+            className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500"
           />
         </div>
 
@@ -539,16 +543,16 @@ function AdminDoctors() {
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
             Status:
           </span>
-          <div className="flex bg-gray-100 p-1 rounded-xl">
+          <div className="flex border border-gray-200 rounded-lg overflow-hidden">
             {["All", "Active", "Inactive"].map((st) => (
               <button
                 key={st}
                 type="button"
                 onClick={() => setStatusFilter(st)}
-                className={`px-3 py-1 text-xs font-medium rounded-lg transition cursor-pointer ${
+                className={`px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                   statusFilter === st
-                    ? "bg-white text-gray-800 shadow-2xs font-semibold"
-                    : "text-gray-500 hover:text-gray-800"
+                    ? "bg-pink-50 text-pink-700 font-semibold"
+                    : "bg-white text-gray-500 hover:text-gray-800"
                 }`}
               >
                 {st}
@@ -576,40 +580,60 @@ function AdminDoctors() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredDoctors.map((doc) => (
             <div
               key={doc.doctor_id}
-              className="bg-white rounded-2xl border border-gray-200/80 shadow-2xs p-5 flex flex-col justify-between"
+              className="relative flex items-center justify-between gap-4 bg-white border border-gray-200 rounded-xl px-5 py-4 shadow-xs hover:border-pink-200 hover:shadow-sm transition-all overflow-hidden"
+            >
+              <span className="absolute inset-y-0 left-0 w-1 bg-pink-500" />
+              <div className="min-w-0 pl-1">
+                <p className="font-semibold text-gray-800 truncate">Dr. {doc.name}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDoctor(doc)}
+                className="shrink-0 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+              >
+                View
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="hidden">
+          {filteredDoctors.map((doc) => (
+            <div
+              key={doc.doctor_id}
+              className="bg-white rounded-xl border border-gray-200 px-4 py-3.5 hover:border-pink-200 transition-colors"
             >
               <div>
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div>
-                    <h3 className="font-bold text-gray-800 text-base">
-                      {doc.name}
-                    </h3>
-                    <p className="text-xs font-semibold text-pink-600 bg-pink-50 inline-block px-2.5 py-0.5 rounded-md mt-1">
-                      {doc.specialization}
-                    </p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-11 w-11 shrink-0 rounded-xl bg-gradient-to-br from-pink-100 to-rose-50 text-pink-700 flex items-center justify-center font-bold">
+                      {doc.name?.charAt(0)?.toUpperCase() || "D"}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-gray-800 text-base truncate">
+                        Dr. {doc.name}
+                      </h3>
+                      <p className="hidden">
+                        {doc.specialization}
+                      </p>
+                    </div>
                   </div>
 
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold flex items-center gap-1.5 ${
-                      doc.status === "Active"
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-gray-100 text-gray-600"
-                    }`}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDoctor(doc)}
+                    className="shrink-0 px-3 py-1.5 bg-pink-50 hover:bg-pink-600 text-pink-700 hover:text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer"
                   >
-                    {doc.status === "Active" ? (
-                      <CheckCircle2 size={12} />
-                    ) : (
-                      <XCircle size={12} />
-                    )}
-                    {doc.status}
-                  </span>
+                    <Eye size={13} />
+                    View
+                  </button>
                 </div>
 
-                <div className="space-y-1.5 text-xs text-gray-600 mb-5 bg-gray-50/80 p-3.5 rounded-xl border border-gray-100">
+                <div className="hidden">
                   <div className="flex items-center gap-2">
                     <Mail size={14} className="text-gray-400 shrink-0" />
                     <span className="truncate">{doc.email}</span>
@@ -642,10 +666,40 @@ function AdminDoctors() {
                     </span>
                   </div>
                 </div>
+
+                <div className="hidden">
+                  <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                    <p className="text-[11px] text-gray-500">Appointments</p>
+                    <p className="text-lg font-bold text-gray-800 mt-0.5">
+                      {doc.scheduled_appointments ?? 0}
+                    </p>
+                  </div>
+                  <div className="bg-green-50/70 rounded-xl p-3 border border-green-100">
+                    <p className="text-[11px] text-green-700">Earnings</p>
+                    <p className="text-lg font-bold text-green-700 mt-0.5 truncate">
+                      NPR {Number(doc.earnings || 0).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="hidden">
+                  <div className="flex items-center justify-between text-[11px] mb-1.5">
+                    <span className="font-medium text-gray-600">Completed work</span>
+                    <span className="font-semibold text-gray-700">
+                      {doc.completed_appointments ?? 0}/{doc.progress_goal ?? 10}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-green-500 transition-all"
+                      style={{ width: `${doc.progress_percent || 0}%` }}
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Actions Footer */}
-              <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
+              <div className="hidden">
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
@@ -694,6 +748,114 @@ function AdminDoctors() {
               </div>
             </div>
           ))}
+        </div>
+        </>
+      )}
+
+      {/* Doctor details modal */}
+      {selectedDoctor && (
+        <div className="fixed inset-0 bg-gray-950/35 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-2xl w-full shadow-xl border border-gray-200 overflow-hidden">
+            <div className="px-5 sm:px-6 py-4 border-b border-gray-200">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-semibold text-gray-800 truncate">Dr. {selectedDoctor.name}</h2>
+                    <p className="text-sm text-gray-500 mt-0.5">{selectedDoctor.specialization}</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setSelectedDoctor(null)} className="p-2 text-gray-400 hover:text-gray-700 hover:bg-white rounded-full transition cursor-pointer" aria-label="Close doctor details">
+                  <X size={19} />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 sm:p-6 max-h-[78vh] overflow-y-auto">
+              <div className="grid grid-cols-3 border-y border-gray-200 mb-6">
+                <div className="py-3 pr-3">
+                  <p className="text-xs text-gray-500">Scheduled</p>
+                  <p className="text-xl font-semibold text-gray-800 mt-0.5">{selectedDoctor.scheduled_appointments ?? 0}</p>
+                </div>
+                <div className="py-3 px-3 border-l border-gray-100">
+                  <p className="text-xs text-gray-500">Completed</p>
+                  <p className="text-xl font-semibold text-gray-800 mt-0.5">{selectedDoctor.completed_appointments ?? 0}</p>
+                </div>
+                <div className="py-3 pl-3 border-l border-gray-100">
+                  <p className="text-xs text-gray-500">Earnings</p>
+                  <p className="text-base font-semibold text-gray-800 mt-1">NPR {Number(selectedDoctor.earnings || 0).toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <span className="text-sm font-medium text-gray-800">Work progress</span>
+                  <span className="text-sm font-bold text-green-700">{selectedDoctor.completed_appointments ?? 0} / {selectedDoctor.progress_goal ?? 10}</span>
+                </div>
+                <div className="h-2 bg-gray-100 overflow-hidden">
+                  <div className="h-full bg-green-600" style={{ width: `${selectedDoctor.progress_percent || 0}%` }} />
+                </div>
+                <p className="text-xs text-gray-500 mt-2">Each completed appointment moves the doctor toward the 10-appointment goal.</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm">
+                <div className="flex items-start gap-3"><Mail size={16} className="text-pink-500 mt-0.5 shrink-0" /><div><p className="text-xs text-gray-400">Email</p><p className="text-gray-700 break-all">{selectedDoctor.email}</p></div></div>
+                <div className="flex items-start gap-3"><Phone size={16} className="text-pink-500 mt-0.5 shrink-0" /><div><p className="text-xs text-gray-400">Phone</p><p className="text-gray-700">{selectedDoctor.phone || "Not provided"}</p></div></div>
+                <div className="flex items-start gap-3"><Award size={16} className="text-pink-500 mt-0.5 shrink-0" /><div><p className="text-xs text-gray-400">NMC & experience</p><p className="text-gray-700">{selectedDoctor.nmc_number} · {selectedDoctor.experience} years</p></div></div>
+                <div className="flex items-start gap-3"><MapPin size={16} className="text-pink-500 mt-0.5 shrink-0" /><div><p className="text-xs text-gray-400">Practice location</p><p className="text-gray-700">{selectedDoctor.practice_at}</p></div></div>
+                <div className="flex items-start gap-3"><Banknote size={16} className="text-pink-500 mt-0.5 shrink-0" /><div><p className="text-xs text-gray-400">Consultation fee</p><p className="text-gray-700 font-semibold">NPR {Number(selectedDoctor.consultation_fee || 0).toLocaleString()}</p></div></div>
+                <div className="flex items-start gap-3"><CheckCircle2 size={16} className={selectedDoctor.status === "Active" ? "text-green-500 mt-0.5 shrink-0" : "text-gray-400 mt-0.5 shrink-0"} /><div><p className="text-xs text-gray-400">Account status</p><p className="text-gray-700 font-semibold">{selectedDoctor.status}</p></div></div>
+              </div>
+
+              <div className="mt-6 pt-5 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditForm({ ...selectedDoctor });
+                    setSelectedDoctor(null);
+                    setShowEditModal(true);
+                  }}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Edit2 size={14} /> Edit doctor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const doctor = selectedDoctor;
+                    setSelectedDoctor(null);
+                    handleOpenSchedule(doctor);
+                  }}
+                  className="px-4 py-2 bg-pink-50 hover:bg-pink-100 text-pink-700 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <CalendarDays size={14} /> Schedule
+                </button>
+                <button
+                  type="button"
+                  disabled={actionLoading === selectedDoctor.doctor_id}
+                  onClick={() => {
+                    const doctor = selectedDoctor;
+                    setSelectedDoctor(null);
+                    handleToggleStatus(doctor);
+                  }}
+                  className={`px-4 py-2 text-xs font-semibold rounded-lg transition cursor-pointer ${selectedDoctor.status === "Active" ? "bg-amber-50 text-amber-700 hover:bg-amber-100" : "bg-green-50 text-green-700 hover:bg-green-100"}`}
+                >
+                  {selectedDoctor.status === "Active" ? "Deactivate" : "Activate"}
+                </button>
+                <button
+                  type="button"
+                  disabled={actionLoading === selectedDoctor.doctor_id}
+                  onClick={() => {
+                    const { doctor_id: doctorId, name } = selectedDoctor;
+                    setSelectedDoctor(null);
+                    handleDeleteDoctor(doctorId, name);
+                  }}
+                  className="ml-auto px-4 py-2 text-red-600 hover:bg-red-50 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

@@ -195,6 +195,10 @@ def get_admin_stats():
             "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Pending'"
         ).fetchone()["total"]
 
+        confirmed_appointments = connection.execute(
+            "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Confirmed'"
+        ).fetchone()["total"]
+
         completed_appointments = connection.execute(
             "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Completed'"
         ).fetchone()["total"]
@@ -202,6 +206,43 @@ def get_admin_stats():
         cancelled_appointments = connection.execute(
             "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Cancelled'"
         ).fetchone()["total"]
+
+        # A booking reserves the doctor's time, so scheduled earnings include
+        # every appointment that has not been cancelled. Completed appointments
+        # are tracked separately for the workload goal shown in the dashboard.
+        doctor_performance_rows = connection.execute(
+            """
+            SELECT
+                d.doctor_id,
+                d.name,
+                d.specialization,
+                d.consultation_fee,
+                COUNT(a.appointment_id) AS scheduled_appointments,
+                COALESCE(SUM(CASE WHEN a.status = 'Completed' THEN 1 ELSE 0 END), 0)
+                    AS completed_appointments,
+                ROUND(d.consultation_fee * COUNT(a.appointment_id), 2) AS earnings
+            FROM DOCTOR d
+            LEFT JOIN APPOINTMENT a
+                ON a.doctor_id = d.doctor_id
+               AND a.status <> 'Cancelled'
+            GROUP BY
+                d.doctor_id,
+                d.name,
+                d.specialization,
+                d.consultation_fee
+            ORDER BY earnings DESC, d.name ASC
+            """
+        ).fetchall()
+
+        doctor_performance = []
+        for row in doctor_performance_rows:
+            item = dict(row)
+            item["progress_goal"] = 10
+            item["progress_percent"] = min(
+                (item["completed_appointments"] / item["progress_goal"]) * 100,
+                100,
+            )
+            doctor_performance.append(item)
 
         return jsonify({
             "stats": {
@@ -212,9 +253,11 @@ def get_admin_stats():
                 "inactive_doctors": inactive_doctors,
                 "total_appointments": total_appointments,
                 "pending_appointments": pending_appointments,
+                "confirmed_appointments": confirmed_appointments,
                 "completed_appointments": completed_appointments,
                 "cancelled_appointments": cancelled_appointments
-            }
+            },
+            "doctor_performance": doctor_performance
         }), 200
 
     finally:

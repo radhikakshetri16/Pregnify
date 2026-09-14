@@ -48,23 +48,41 @@ def get_doctors():
         doctors = connection.execute(
             """
             SELECT
-                doctor_id,
-                name,
-                email,
-                phone,
-                specialization,
-                nmc_number,
-                experience,
-                practice_at,
-                consultation_fee,
-                status
-            FROM DOCTOR
-            ORDER BY name
+                d.doctor_id,
+                d.name,
+                d.email,
+                d.phone,
+                d.specialization,
+                d.nmc_number,
+                d.experience,
+                d.practice_at,
+                d.consultation_fee,
+                d.status,
+                COUNT(a.appointment_id) AS scheduled_appointments,
+                COALESCE(SUM(CASE WHEN a.status = 'Completed' THEN 1 ELSE 0 END), 0)
+                    AS completed_appointments,
+                ROUND(d.consultation_fee * COUNT(a.appointment_id), 2) AS earnings
+            FROM DOCTOR d
+            LEFT JOIN APPOINTMENT a
+                ON a.doctor_id = d.doctor_id
+               AND a.status <> 'Cancelled'
+            GROUP BY d.doctor_id
+            ORDER BY d.name
             """
         ).fetchall()
 
         return jsonify({
-            "doctors": [dict(doctor) for doctor in doctors]
+            "doctors": [
+                {
+                    **dict(doctor),
+                    "progress_goal": 10,
+                    "progress_percent": min(
+                        (doctor["completed_appointments"] / 10) * 100,
+                        100,
+                    ),
+                }
+                for doctor in doctors
+            ]
         }), 200
 
     finally:
