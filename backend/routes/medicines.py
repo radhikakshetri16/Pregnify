@@ -45,7 +45,8 @@ def get_doctors():
             SELECT
                 doctor_id,
                 name,
-                specialization
+                specialization,
+                nmc_number
             FROM DOCTOR
             WHERE status = 'Active'
             ORDER BY name ASC
@@ -57,7 +58,8 @@ def get_doctors():
                 {
                     "doctor_id": doctor["doctor_id"],
                     "name": doctor["name"],
-                    "specialization": doctor["specialization"]
+                    "specialization": doctor["specialization"],
+                    "nmc_number": doctor["nmc_number"]
                 }
                 for doctor in doctors
             ]

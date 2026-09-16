@@ -79,7 +79,7 @@ function Sidebar() {
             Health
           </NavLink>
 
-          {/* Medical History */}
+          {/* Health Background */}
           <NavLink
             to="/medicalhistory"
             className={({ isActive }) =>
@@ -91,7 +91,7 @@ function Sidebar() {
             }
           >
             <ClipboardList size={20} />
-            Medical History
+            Health Background
           </NavLink>
 
           {/* Appointments */}

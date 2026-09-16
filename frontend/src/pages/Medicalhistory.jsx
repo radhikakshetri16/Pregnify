@@ -74,17 +74,17 @@ try {
 
   if (!response.ok) {
     throw new Error(
-      data.error || "Unable to load medical history."
+      data.error || "Unable to load health background."
     );
   }
 
   setRecords(data.records || data.medical_history || []);
 } catch (error) {
-  console.error("Medical history error:", error);
+  console.error("Health background error:", error);
 
   setError(
     error.message ||
-      "Unable to load medical history. Please make sure the backend is running."
+      "Unable to load health background. Please make sure the backend is running."
   );
 } finally {
   setLoading(false);
@@ -201,8 +201,8 @@ try {
     throw new Error(
       data.error ||
         (editingRecord
-          ? "Unable to update medical history."
-          : "Unable to save medical history.")
+          ? "Unable to update health background."
+          : "Unable to save health background.")
     );
   }
 
@@ -211,11 +211,11 @@ try {
 
   await fetchRecords();
 } catch (error) {
-  console.error("Save medical history error:", error);
+  console.error("Save health background error:", error);
 
   setFormError(
     error.message ||
-      "Something went wrong while saving medical history."
+      "Something went wrong while saving health background."
   );
 } finally {
   setSaving(false);
@@ -226,7 +226,7 @@ try {
 
 const handleDelete = async (recordId) => {
 const confirmed = window.confirm(
-"Are you sure you want to delete this medical history record?"
+"Are you sure you want to delete this health background record?"
 );
 
 
@@ -302,7 +302,7 @@ return parsedDate.toLocaleDateString("en-US", {
 
 if (loading) {
 return ( <div className="max-w-5xl mx-auto"> <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center"> <div className="w-8 h-8 border-2 border-pink-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" /> <p className="text-gray-500">
-Loading your medical history... </p> </div> </div>
+Loading your health background... </p> </div> </div>
 );
 }
 
@@ -315,11 +315,11 @@ return ( <div className="max-w-5xl mx-auto pb-10">
 
       <div>
         <h1 className="text-3xl font-bold text-gray-800">
-          Medical History
+          Health Background
         </h1>
 
         <p className="text-gray-500 mt-1">
-          Keep track of your medical conditions and history.
+          Keep track of your health background, chronic conditions, and medical notes.
         </p>
       </div>
     </div>
@@ -330,7 +330,7 @@ return ( <div className="max-w-5xl mx-auto pb-10">
       className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pink-600 text-white text-sm font-medium hover:bg-pink-700 transition"
     >
       <Plus size={17} />
-      Add History
+      Add Background Record
     </button>
   </div>
 
@@ -356,11 +356,11 @@ return ( <div className="max-w-5xl mx-auto pb-10">
       </div>
 
       <h3 className="text-lg font-semibold text-gray-800">
-        No medical history yet
+        No health background recorded yet
       </h3>
 
       <p className="text-sm text-gray-500 mt-1 mb-5">
-        Add your medical conditions and history to keep
+        Add your health conditions and background history to keep
         your records organized.
       </p>
 
@@ -370,7 +370,7 @@ return ( <div className="max-w-5xl mx-auto pb-10">
         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pink-600 text-white text-sm font-medium hover:bg-pink-700 transition"
       >
         <Plus size={17} />
-        Add Medical History
+        Add Health Background
       </button>
     </div>
   ) : (
@@ -473,7 +473,7 @@ return ( <div className="max-w-5xl mx-auto pb-10">
         <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
           <div>
             <h2 className="text-xl font-semibold text-gray-800">
-              Medical History Details
+              Health Background Details
             </h2>
 
             <p className="text-sm text-gray-500 mt-1">
@@ -600,14 +600,14 @@ return ( <div className="max-w-5xl mx-auto pb-10">
           <div>
             <h2 className="text-xl font-semibold text-gray-800">
               {editingRecord
-                ? "Edit Medical History"
-                : "Add Medical History"}
+                ? "Edit Health Background"
+                : "Add Health Background"}
             </h2>
 
             <p className="text-sm text-gray-500 mt-1">
               {editingRecord
-                ? "Update your medical history details."
-                : "Add a medical condition to your records."}
+                ? "Update your health background details."
+                : "Add a health condition to your records."}
             </p>
           </div>
 

@@ -590,6 +590,9 @@ function AdminDoctors() {
               <span className="absolute inset-y-0 left-0 w-1 bg-pink-500" />
               <div className="min-w-0 pl-1">
                 <p className="font-semibold text-gray-800 truncate">Dr. {doc.name}</p>
+                <p className="text-xs text-gray-500 mt-0.5 truncate">
+                  {doc.specialization} • NMC: <span className="font-medium text-gray-700">{doc.nmc_number}</span>
+                </p>
               </div>
               <button
                 type="button"

@@ -217,6 +217,7 @@ def get_admin_stats():
                 d.name,
                 d.specialization,
                 d.consultation_fee,
+                d.nmc_number,
                 COUNT(a.appointment_id) AS scheduled_appointments,
                 COALESCE(SUM(CASE WHEN a.status = 'Completed' THEN 1 ELSE 0 END), 0)
                     AS completed_appointments,
@@ -229,7 +230,8 @@ def get_admin_stats():
                 d.doctor_id,
                 d.name,
                 d.specialization,
-                d.consultation_fee
+                d.consultation_fee,
+                d.nmc_number
             ORDER BY earnings DESC, d.name ASC
             """
         ).fetchall()

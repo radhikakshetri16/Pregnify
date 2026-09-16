@@ -107,7 +107,9 @@ def list_appointments():
                 d.practice_at AS clinic_name,
                 d.specialization,
                 d.consultation_fee,
-                d.phone AS doctor_phone
+                d.phone AS doctor_phone,
+                d.nmc_number AS doctor_nmc,
+                d.nmc_number
             FROM APPOINTMENT a
             LEFT JOIN DOCTOR d ON a.doctor_id = d.doctor_id
             WHERE a.patient_id = ?

@@ -431,7 +431,7 @@ function Appointments() {
                   <option value="">-- Choose a Registered Doctor --</option>
                   {doctors.map((doc) => (
                     <option key={doc.doctor_id} value={doc.doctor_id}>
-                      Dr. {doc.name} • {doc.specialization} ({doc.practice_at}) — NPR {doc.consultation_fee}
+                      Dr. {doc.name} • {doc.specialization} (NMC: {doc.nmc_number}) — {doc.practice_at} — NPR {doc.consultation_fee}
                     </option>
                   ))}
                 </select>
@@ -721,6 +721,12 @@ function Appointments() {
                 <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
                   <span className="text-gray-400">Specialization:</span>
                   <span className="font-semibold text-gray-800 text-right">{selected.specialization}</span>
+                </div>
+              )}
+              {(selected.doctor_nmc || selected.nmc_number) && (
+                <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
+                  <span className="text-gray-400">NMC Number:</span>
+                  <span className="font-semibold text-gray-800 text-right">{selected.doctor_nmc || selected.nmc_number}</span>
                 </div>
               )}
               <div className="flex justify-between gap-4 py-1 border-b border-gray-50">

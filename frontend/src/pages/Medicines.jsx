@@ -976,29 +976,16 @@ function Medicines() {
                       </option>
 
 
-                      {doctors.map(
-                        (doctor) => (
-
-                          <option
-                            key={
-                              doctor.doctor_id
-                            }
-                            value={
-                              doctor.doctor_id
-                            }
-                          >
-
-                            Dr.{" "}
-                            {doctor.name}
-
-                            {doctor.specialization
-                              ? ` — ${doctor.specialization}`
-                              : ""}
-
-                          </option>
-
-                        )
-                      )}
+                      {doctors.map((doctor) => (
+                        <option
+                          key={doctor.doctor_id}
+                          value={doctor.doctor_id}
+                        >
+                          Dr. {doctor.name}
+                          {doctor.specialization ? ` — ${doctor.specialization}` : ""}
+                          {doctor.nmc_number ? ` (NMC: ${doctor.nmc_number})` : ""}
+                        </option>
+                      ))}
 
                     </select>
 
