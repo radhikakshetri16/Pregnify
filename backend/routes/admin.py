@@ -236,6 +236,7 @@ def get_admin_stats():
             """
         ).fetchall()
 
+        total_scheduled = sum(row["scheduled_appointments"] for row in doctor_performance_rows)
         doctor_performance = []
         for row in doctor_performance_rows:
             item = dict(row)
@@ -243,6 +244,11 @@ def get_admin_stats():
             item["progress_percent"] = min(
                 (item["completed_appointments"] / item["progress_goal"]) * 100,
                 100,
+            )
+            item["performance_percentage"] = (
+                round((item["scheduled_appointments"] / total_scheduled) * 100, 1)
+                if total_scheduled > 0
+                else 0.0
             )
             doctor_performance.append(item)
 
