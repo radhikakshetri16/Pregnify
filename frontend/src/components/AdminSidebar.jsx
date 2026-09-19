@@ -4,13 +4,22 @@ import {
   Stethoscope,
   Users,
   Settings,
+  CreditCard,
   LogOut,
 } from "lucide-react";
 
 function AdminSidebar() {
   const navigate = useNavigate();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch("http://127.0.0.1:5000/api/admin/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // Clear the local shell even when the development API is unavailable.
+    }
     // Remove the logged-in admin from browser storage
     localStorage.removeItem("admin");
 
@@ -77,6 +86,20 @@ function AdminSidebar() {
           >
             <Stethoscope size={20} />
             Doctors
+          </NavLink>
+
+          <NavLink
+            to="/admin/payments"
+            className={({ isActive }) =>
+              `w-full flex items-center gap-3 px-4 py-3 rounded-lg ${
+                isActive
+                  ? "bg-pink-50 text-pink-600 font-medium"
+                  : "text-gray-600 hover:bg-gray-50"
+              }`
+            }
+          >
+            <CreditCard size={20} />
+            Payments
           </NavLink>
 
           {/* Settings */}

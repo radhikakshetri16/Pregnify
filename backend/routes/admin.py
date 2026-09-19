@@ -1,5 +1,5 @@
 import re
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, session
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from database.db import get_db_connection
@@ -146,6 +146,10 @@ def login_admin():
                 "error": "Invalid email or password"
             }), 401
 
+        session.clear()
+        session["role"] = "admin"
+        session["admin_id"] = admin["admin_id"]
+
         return jsonify({
             "message": "Login successful",
             "admin": {
@@ -157,6 +161,12 @@ def login_admin():
 
     finally:
         connection.close()
+
+
+@admin_bp.route("/logout", methods=["POST"])
+def logout_admin():
+    session.clear()
+    return jsonify({"message": "Logged out"}), 200
 
 
 # --------------------------------
@@ -188,23 +198,23 @@ def get_admin_stats():
         ).fetchone()["total"]
 
         total_appointments = connection.execute(
-            "SELECT COUNT(*) AS total FROM APPOINTMENT"
+            "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE payment_status IN ('NOT_REQUIRED', 'PAID', 'REFUND_REQUESTED', 'REFUNDED')"
         ).fetchone()["total"]
 
         pending_appointments = connection.execute(
-            "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Pending'"
+            "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Pending' AND payment_status IN ('NOT_REQUIRED', 'PAID')"
         ).fetchone()["total"]
 
         confirmed_appointments = connection.execute(
-            "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Confirmed'"
+            "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Confirmed' AND payment_status IN ('NOT_REQUIRED', 'PAID')"
         ).fetchone()["total"]
 
         completed_appointments = connection.execute(
-            "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Completed'"
+            "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Completed' AND payment_status IN ('NOT_REQUIRED', 'PAID')"
         ).fetchone()["total"]
 
         cancelled_appointments = connection.execute(
-            "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Cancelled'"
+            "SELECT COUNT(*) AS total FROM APPOINTMENT WHERE status = 'Cancelled' AND payment_status IN ('NOT_REQUIRED', 'PAID', 'REFUND_REQUESTED', 'REFUNDED')"
         ).fetchone()["total"]
 
         # A booking reserves the doctor's time, so scheduled earnings include
@@ -226,6 +236,7 @@ def get_admin_stats():
             LEFT JOIN APPOINTMENT a
                 ON a.doctor_id = d.doctor_id
                AND a.status <> 'Cancelled'
+               AND a.payment_status IN ('NOT_REQUIRED', 'PAID')
             GROUP BY
                 d.doctor_id,
                 d.name,

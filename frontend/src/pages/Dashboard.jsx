@@ -34,7 +34,7 @@ function Dashboard() {
         await Promise.all([
           fetch(`${API_BASE}/pregnancy?user_id=${user.id}`),
           fetch(`${API_BASE}/health?user_id=${user.id}`),
-          fetch(`${API_BASE}/appointments?user_id=${user.id}`),
+          fetch(`${API_BASE}/appointments`, { credentials: "include" }),
           fetch(`${API_BASE}/doctors`),
         ]);
 
@@ -328,4 +328,4 @@ function Dashboard() {
   );
 }
 
-export default Dashboard;
+export default Dashboard;

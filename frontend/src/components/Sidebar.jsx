@@ -14,7 +14,15 @@ import {
 function Sidebar() {
   const navigate = useNavigate();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch("http://127.0.0.1:5000/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // Clear the local shell even when the development API is unavailable.
+    }
     // Remove the logged-in user from browser storage
     localStorage.removeItem("user");
 

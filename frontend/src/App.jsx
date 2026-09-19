@@ -39,6 +39,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminDoctors from "./pages/AdminDoctors";
 import AdminUsers from "./pages/AdminUsers";
 import AdminSettings from "./pages/AdminSettings";
+import AdminPayments from "./pages/AdminPayments";
 
 function App() {
   return (
@@ -96,6 +97,7 @@ function App() {
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="doctors" element={<AdminDoctors />} />
+          <Route path="payments" element={<AdminPayments />} />
           <Route path="users" element={<AdminUsers />} />
           <Route path="settings" element={<AdminSettings />} />
         </Route>
