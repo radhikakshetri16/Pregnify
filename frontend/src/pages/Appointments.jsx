@@ -66,6 +66,8 @@ function Appointments() {
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [paymentConfig, setPaymentConfig] = useState(null);
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
   // Doctor schedule & slot states
   const [doctorSchedule, setDoctorSchedule] = useState(null);
@@ -86,7 +88,7 @@ function Appointments() {
     setLoading(true);
     try {
       const data = await readApiResponse(
-        await fetch(`${API_BASE}/appointments?user_id=${userId}`)
+        await fetch(`${API_BASE}/appointments`, { credentials: "include" })
       );
       setAppointments(data.appointments || []);
     } catch (requestError) {
@@ -109,10 +111,43 @@ function Appointments() {
     }
   }, []);
 
+  const loadPaymentConfig = useCallback(async () => {
+    try {
+      const data = await readApiResponse(
+        await fetch(`${API_BASE}/payments/providers`)
+      );
+      setPaymentConfig(data);
+    } catch (requestError) {
+      console.error("Failed to load payment provider status", requestError);
+    }
+  }, []);
+
   useEffect(() => {
     loadAppointments();
     loadDoctors();
-  }, [loadAppointments, loadDoctors]);
+    loadPaymentConfig();
+  }, [loadAppointments, loadDoctors, loadPaymentConfig]);
+
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get("payment");
+    if (!result) return;
+    const messages = {
+      success: "Payment verified. Your appointment is now pending doctor confirmation.",
+      pending: "Payment is still pending verification. Please check again shortly.",
+      cancelled: "Payment was cancelled and the appointment slot was released.",
+      failed: "Payment could not be completed. The appointment slot was released.",
+      expired: "The payment hold expired. Please book the slot again.",
+      "refund-required": "Payment arrived after the slot hold expired. A refund has been queued.",
+      invalid: "The payment response could not be verified.",
+      "verification-error": "The provider could not be reached to verify payment. Please check again shortly.",
+    };
+    const message = messages[result] || "Payment status updated.";
+    queueMicrotask(() => {
+      if (["success", "pending"].includes(result)) setNotice(message);
+      else setError(message);
+    });
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   // When selected doctor changes, fetch their schedule
   const handleDoctorChange = async (e) => {
@@ -258,6 +293,7 @@ function Appointments() {
     setAvailableSlots([]);
     setSlotMessage("");
     setLoadingSchedule(false);
+    setIdempotencyKey(crypto.randomUUID());
   };
 
   const handleCloseModal = () => {
@@ -287,24 +323,42 @@ function Appointments() {
 
     setSaving(true);
     try {
-      await readApiResponse(
-        await fetch(`${API_BASE}/appointments`, {
+      const data = await readApiResponse(
+        await fetch(`${API_BASE}/payments/initiate`, {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            user_id: userId,
             doctor_id: form.doctor_id,
             appointment_date: form.appointment_date,
             appointment_time: form.appointment_time,
             appointment_type: form.appointment_type,
             reason: form.reason,
+            provider: "ESEWA",
+            idempotency_key: idempotencyKey,
           }),
         })
       );
-      setNotice("Appointment booked successfully!");
-      handleCloseForm();
-      await loadAppointments();
-      setTimeout(() => setNotice(""), 3500);
+      if (data.checkout_type === "redirect" && data.redirect_url) {
+        window.location.assign(data.redirect_url);
+        return;
+      }
+      if (data.checkout_type === "form" && data.form_action) {
+        const checkoutForm = document.createElement("form");
+        checkoutForm.method = "POST";
+        checkoutForm.action = data.form_action;
+        Object.entries(data.form_fields || {}).forEach(([name, value]) => {
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.name = name;
+          input.value = String(value);
+          checkoutForm.appendChild(input);
+        });
+        document.body.appendChild(checkoutForm);
+        checkoutForm.submit();
+        return;
+      }
+      throw new Error("The payment provider did not return a checkout destination.");
     } catch (saveError) {
       setError(saveError.message || "Unable to save appointment.");
     } finally {
@@ -317,15 +371,16 @@ function Appointments() {
     setCancelling(true);
     setError("");
     try {
-      await readApiResponse(
+      const data = await readApiResponse(
         await fetch(
-          `${API_BASE}/appointments/${target.appointment_id}?user_id=${userId}`,
+          `${API_BASE}/appointments/${target.appointment_id}`,
           {
             method: "DELETE",
+            credentials: "include",
           }
         )
       );
-      setNotice("Appointment cancelled successfully.");
+      setNotice(data.message || "Appointment cancelled successfully.");
       handleCloseModal();
       await loadAppointments();
       setTimeout(() => setNotice(""), 3500);
@@ -579,6 +634,35 @@ function Appointments() {
                 />
               </div>
 
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-gray-700">Pay consultation fee</p>
+                    <p className="mt-1 text-xs text-gray-500">The slot is held for 10 minutes while you complete payment.</p>
+                  </div>
+                  <p className="text-lg font-bold text-pink-700">
+                    NPR {Number(doctors.find((doc) => String(doc.doctor_id) === String(form.doctor_id))?.consultation_fee || 0).toLocaleString()}
+                  </p>
+                </div>
+                <div className="mt-3 rounded-xl border border-pink-500 bg-pink-50 p-3 text-center text-sm font-semibold text-pink-700 ring-2 ring-pink-100">
+                  Pay securely with eSewa
+                </div>
+                {paymentConfig?.environment === "sandbox" && paymentConfig.providers?.ESEWA?.test_credentials && (
+                  <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                    <p className="font-bold">eSewa sandbox login</p>
+                    <p className="mt-1">
+                      ID: <span className="font-semibold">{paymentConfig.providers.ESEWA.test_credentials.esewa_id}</span>
+                      {" · "}Password: <span className="font-semibold">{paymentConfig.providers.ESEWA.test_credentials.password}</span>
+                    </p>
+                    <p>
+                      MPIN: <span className="font-semibold">{paymentConfig.providers.ESEWA.test_credentials.mpin}</span>
+                      {" · "}Token/OTP: <span className="font-semibold">{paymentConfig.providers.ESEWA.test_credentials.token}</span>
+                    </p>
+                    <p className="mt-1 text-emerald-700">Personal eSewa credentials do not work on the sandbox gateway.</p>
+                  </div>
+                )}
+              </div>
+
               {/* Actions Footer */}
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
                 <button
@@ -590,10 +674,10 @@ function Appointments() {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving || !form.appointment_date || !form.appointment_time}
+                  disabled={saving || !form.appointment_date || !form.appointment_time || paymentConfig?.providers?.ESEWA?.enabled === false}
                   className="px-6 py-2.5 bg-pink-600 text-white text-sm font-semibold rounded-xl hover:bg-pink-700 disabled:opacity-50 transition cursor-pointer shadow-xs"
                 >
-                  {saving ? "Booking..." : "Confirm Booking"}
+                  {saving ? "Opening payment..." : "Pay with eSewa"}
                 </button>
               </div>
             </form>
@@ -662,6 +746,18 @@ function Appointments() {
                         <span className="truncate">{apt.clinic_name}</span>
                       </div>
                     )}
+                    <div className="flex items-center gap-1.5">
+                      <Lock size={13} className="text-gray-400 shrink-0" />
+                      <span>
+                        {apt.payment_status === "PAID"
+                          ? `Paid via ${apt.payment_provider || "gateway"}`
+                          : apt.payment_status === "REFUND_REQUESTED"
+                            ? "Refund requested"
+                            : apt.payment_status === "REFUNDED"
+                              ? "Refunded"
+                              : "Legacy booking"}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -755,6 +851,20 @@ function Appointments() {
                   {selected.status}
                 </span>
               </div>
+              <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
+                <span className="text-gray-400">Payment:</span>
+                <span className="font-semibold text-gray-800 text-right">
+                  {selected.payment_status === "PAID"
+                    ? `Paid${selected.payment_provider ? ` via ${selected.payment_provider}` : ""}`
+                    : (selected.payment_status || "Not required").replaceAll("_", " ")}
+                </span>
+              </div>
+              {selected.payment_transaction_id && (
+                <div className="flex justify-between gap-4 py-1 border-b border-gray-50">
+                  <span className="text-gray-400">Transaction:</span>
+                  <span className="max-w-56 truncate font-mono text-[11px] text-gray-700" title={selected.payment_transaction_id}>{selected.payment_transaction_id}</span>
+                </div>
+              )}
               {selected.reason && (
                 <div className="py-1 border-b border-gray-50">
                   <span className="text-gray-400 block mb-1">Reason:</span>

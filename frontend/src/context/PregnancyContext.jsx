@@ -73,7 +73,7 @@ export const PregnancyProvider = ({ children }) => {
           }
 
           // Fetch Appointments
-          const resApp = await fetch(`${API_BASE_URL}/appointments?userId=${encodeURIComponent(userId)}`);
+          const resApp = await fetch(`${API_BASE_URL}/appointments`, { credentials: "include" });
           if (resApp.ok) {
             const appData = await resApp.json();
             if (appData.appointments) {

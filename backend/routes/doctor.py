@@ -5,6 +5,7 @@ from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from database.db import get_db_connection
+from routes.care import expire_unpaid_appointments
 
 
 doctor_bp = Blueprint(
@@ -66,6 +67,7 @@ def get_doctors():
             LEFT JOIN APPOINTMENT a
                 ON a.doctor_id = d.doctor_id
                AND a.status <> 'Cancelled'
+               AND a.payment_status IN ('NOT_REQUIRED', 'PAID')
             GROUP BY d.doctor_id
             ORDER BY d.name
             """
@@ -897,6 +899,7 @@ def get_doctor_dashboard_stats(doctor_id):
             WHERE doctor_id = ?
               AND appointment_date = DATE('now')
               AND status <> 'Cancelled'
+              AND payment_status IN ('NOT_REQUIRED', 'PAID')
             """,
             (doctor_id,)
         ).fetchone()["total"]
@@ -909,6 +912,7 @@ def get_doctor_dashboard_stats(doctor_id):
             WHERE doctor_id = ?
               AND appointment_date >= DATE('now')
               AND status NOT IN ('Completed', 'Cancelled')
+              AND payment_status IN ('NOT_REQUIRED', 'PAID')
             """,
             (doctor_id,)
         ).fetchone()["total"]
@@ -920,6 +924,7 @@ def get_doctor_dashboard_stats(doctor_id):
             FROM APPOINTMENT a
             WHERE a.doctor_id = ?
               AND a.status <> 'Cancelled'
+              AND a.payment_status IN ('NOT_REQUIRED', 'PAID')
             """,
             (doctor_id,)
         ).fetchone()["total"]
@@ -931,6 +936,7 @@ def get_doctor_dashboard_stats(doctor_id):
             FROM APPOINTMENT
             WHERE doctor_id = ?
               AND status = 'Completed'
+              AND payment_status IN ('NOT_REQUIRED', 'PAID')
             """,
             (doctor_id,)
         ).fetchone()["total"]
@@ -953,6 +959,7 @@ def get_doctor_dashboard_stats(doctor_id):
             WHERE a.doctor_id = ?
               AND a.appointment_date = DATE('now')
               AND a.status <> 'Cancelled'
+              AND a.payment_status IN ('NOT_REQUIRED', 'PAID')
             ORDER BY a.appointment_time ASC
             """,
             (doctor_id,)
@@ -976,6 +983,7 @@ def get_doctor_dashboard_stats(doctor_id):
             WHERE a.doctor_id = ?
               AND a.appointment_date >= DATE('now')
               AND a.status NOT IN ('Completed', 'Cancelled')
+              AND a.payment_status IN ('NOT_REQUIRED', 'PAID')
             ORDER BY a.appointment_date ASC, a.appointment_time ASC
             LIMIT 5
             """,
@@ -1034,6 +1042,7 @@ def get_doctor_appointments(doctor_id):
             FROM APPOINTMENT a
             JOIN PATIENT p ON a.patient_id = p.patient_id
             WHERE a.doctor_id = ?
+              AND a.payment_status IN ('NOT_REQUIRED', 'PAID')
             ORDER BY a.appointment_date DESC, a.appointment_time DESC
             """,
             (doctor_id,)
@@ -1094,6 +1103,7 @@ def update_doctor_appointment(doctor_id, appointment_id):
             SELECT appointment_id
             FROM APPOINTMENT
             WHERE appointment_id = ? AND doctor_id = ?
+              AND payment_status IN ('NOT_REQUIRED', 'PAID')
             """,
             (appointment_id, doctor_id)
         ).fetchone()
@@ -1133,6 +1143,7 @@ def update_doctor_appointment(doctor_id, appointment_id):
             FROM APPOINTMENT a
             JOIN PATIENT p ON a.patient_id = p.patient_id
             WHERE a.appointment_id = ?
+              AND a.payment_status IN ('NOT_REQUIRED', 'PAID')
             """,
             (appointment_id,)
         ).fetchone()
@@ -1178,6 +1189,7 @@ def get_doctor_patients(doctor_id):
             JOIN APPOINTMENT a ON p.patient_id = a.patient_id
             WHERE a.doctor_id = ?
               AND a.status <> 'Cancelled'
+              AND a.payment_status IN ('NOT_REQUIRED', 'PAID')
             GROUP BY p.patient_id
             ORDER BY last_appointment_date DESC
             """,
@@ -1234,6 +1246,7 @@ def get_doctor_patient_detail(doctor_id, patient_id):
             WHERE doctor_id = ?
               AND patient_id = ?
               AND status <> 'Cancelled'
+              AND payment_status IN ('NOT_REQUIRED', 'PAID')
             LIMIT 1
             """,
             (doctor_id, patient_id)
@@ -1276,6 +1289,7 @@ def get_doctor_patient_detail(doctor_id, patient_id):
                 next_appointment
             FROM APPOINTMENT
             WHERE doctor_id = ? AND patient_id = ?
+              AND payment_status IN ('NOT_REQUIRED', 'PAID')
             ORDER BY appointment_date DESC, appointment_time DESC
             """,
             (doctor_id, patient_id)
@@ -1550,6 +1564,7 @@ def get_available_slots(doctor_id):
     connection = get_db_connection()
 
     try:
+        expire_unpaid_appointments(connection)
         doctor = connection.execute(
             "SELECT doctor_id, name, specialization, practice_at, consultation_fee, status FROM DOCTOR WHERE doctor_id = ?",
             (doctor_id,)
@@ -1622,6 +1637,7 @@ def get_available_slots(doctor_id):
             SELECT appointment_time
             FROM APPOINTMENT
             WHERE doctor_id = ? AND appointment_date = ? AND status <> 'Cancelled'
+              AND payment_status <> 'EXPIRED'
             """,
             (doctor_id, requested_date_str)
         ).fetchall()

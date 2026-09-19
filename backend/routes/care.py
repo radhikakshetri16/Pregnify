@@ -1,13 +1,33 @@
 import json
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
 from database.db import get_db_connection
+from auth_session import current_user_id, user_required
 
 
 care_bp = Blueprint("care", __name__, url_prefix="/api")
+
+
+def expire_unpaid_appointments(connection):
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    rows = connection.execute(
+        "SELECT payment_id, appointment_id FROM PAYMENT WHERE status IN ('INITIATED', 'PENDING') AND expires_at <= ?",
+        (now,),
+    ).fetchall()
+    for row in rows:
+        connection.execute(
+            "UPDATE PAYMENT SET status = 'EXPIRED', failure_reason = 'Payment hold expired', updated_at = ? WHERE payment_id = ?",
+            (now, row["payment_id"]),
+        )
+        connection.execute(
+            "UPDATE APPOINTMENT SET status = 'Cancelled', payment_status = 'EXPIRED' WHERE appointment_id = ? AND payment_status = 'PENDING'",
+            (row["appointment_id"],),
+        )
+    if rows:
+        connection.commit()
 
 
 def patient_id_for(connection, user_id):
@@ -75,15 +95,13 @@ def configured_slot_for(connection, doctor_id, appointment_date, requested_slot)
 # 1. GET /api/appointments
 # =========================================================
 @care_bp.route("/appointments", methods=["GET"])
+@user_required
 def list_appointments():
     connection = get_db_connection()
     try:
-        patient_id = request_patient_id(connection, request.args)
+        expire_unpaid_appointments(connection)
+        patient_id = patient_id_for(connection, current_user_id())
         if not patient_id:
-            # If user_id wasn't provided or patient doesn't exist yet
-            user_id = request.args.get("user_id") or request.args.get("userId")
-            if not user_id:
-                return jsonify({"error": "A valid user_id is required"}), 400
             return jsonify({"appointments": []}), 200
 
         records = connection.execute(
@@ -103,16 +121,21 @@ def list_appointments():
                 a.tests_recommended,
                 a.follow_up_date,
                 a.next_appointment,
+                a.payment_status,
                 d.name AS doctor_name,
                 d.practice_at AS clinic_name,
                 d.specialization,
                 d.consultation_fee,
                 d.phone AS doctor_phone,
                 d.nmc_number AS doctor_nmc,
-                d.nmc_number
+                d.nmc_number,
+                (SELECT p.provider FROM PAYMENT p WHERE p.appointment_id = a.appointment_id ORDER BY p.payment_id DESC LIMIT 1) AS payment_provider,
+                (SELECT p.provider_transaction_id FROM PAYMENT p WHERE p.appointment_id = a.appointment_id ORDER BY p.payment_id DESC LIMIT 1) AS payment_transaction_id,
+                (SELECT p.amount_paisa FROM PAYMENT p WHERE p.appointment_id = a.appointment_id ORDER BY p.payment_id DESC LIMIT 1) AS payment_amount_paisa
             FROM APPOINTMENT a
             LEFT JOIN DOCTOR d ON a.doctor_id = d.doctor_id
             WHERE a.patient_id = ?
+              AND a.payment_status IN ('NOT_REQUIRED', 'PAID', 'REFUND_REQUESTED', 'REFUNDED')
             ORDER BY a.appointment_date ASC, a.appointment_time ASC, a.appointment_id ASC
             """,
             (patient_id,),
@@ -129,7 +152,13 @@ def list_appointments():
 # =========================================================
 @care_bp.route("/api/appointments", methods=["POST"])  # Handles both prefixes if needed
 @care_bp.route("/appointments", methods=["POST"])
+@user_required
 def create_appointment():
+    return jsonify({
+        "error": "Online payment is required. Use /api/payments/initiate to book an appointment."
+    }), 402
+
+    # Kept below temporarily for database compatibility with older deployments.
     data = request.get_json() or {}
     user_id = data.get("user_id") or data.get("userId")
     doctor_id = data.get("doctor_id")
@@ -279,11 +308,10 @@ def create_appointment():
 # 3. PUT /api/appointments/<appointment_id>
 # =========================================================
 @care_bp.route("/appointments/<int:appointment_id>", methods=["PUT"])
+@user_required
 def update_appointment(appointment_id):
     data = request.get_json() or {}
-    user_id = data.get("user_id") or data.get("userId")
-    if not user_id:
-        return jsonify({"error": "A valid user_id is required"}), 400
+    user_id = current_user_id()
 
     connection = get_db_connection()
     try:
@@ -302,6 +330,13 @@ def update_appointment(appointment_id):
         ).fetchone()
         if not existing:
             return jsonify({"error": "Appointment not found or unauthorized"}), 404
+
+        if existing["payment_status"] == "PAID" and any(
+            key in data for key in ("doctor_id", "appointment_date", "appointment_time")
+        ):
+            return jsonify({
+                "error": "Paid appointments cannot change doctor, date, or time. Cancel and book again so the payment can be refunded safely."
+            }), 409
 
         updates = {}
         # If doctor, date, or time changes, re-validate availability
@@ -412,9 +447,9 @@ def update_appointment(appointment_id):
 # 4. DELETE /api/appointments/<appointment_id> (CANCEL)
 # =========================================================
 @care_bp.route("/appointments/<int:appointment_id>", methods=["DELETE"])
+@user_required
 def cancel_appointment(appointment_id):
-    data = request.get_json(silent=True) or {}
-    user_id = data.get("user_id") or data.get("userId") or request.args.get("user_id") or request.args.get("userId")
+    user_id = current_user_id()
 
     connection = get_db_connection()
     try:
@@ -422,24 +457,41 @@ def cancel_appointment(appointment_id):
         if not patient_id:
             return jsonify({"error": "A valid user_id is required"}), 400
 
-        # Perform soft cancellation: status = 'Cancelled'
+        appointment = connection.execute(
+            "SELECT appointment_id, payment_status FROM APPOINTMENT WHERE appointment_id = ? AND patient_id = ?",
+            (appointment_id, patient_id),
+        ).fetchone()
+        if not appointment:
+            return jsonify({"error": "Appointment not found or unauthorized"}), 404
+
+        connection.execute("BEGIN IMMEDIATE")
         cursor = connection.execute(
             """
             UPDATE APPOINTMENT
-            SET status = 'Cancelled'
+            SET status = 'Cancelled',
+                payment_status = CASE WHEN payment_status = 'PAID' THEN 'REFUND_REQUESTED' ELSE payment_status END
             WHERE appointment_id = ? AND patient_id = ?
             """,
             (appointment_id, patient_id),
         )
+        refund_requested = appointment["payment_status"] == "PAID"
+        if refund_requested:
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            connection.execute(
+                """
+                UPDATE PAYMENT
+                SET status = 'REFUND_REQUESTED', refund_requested_at = ?, updated_at = ?
+                WHERE appointment_id = ? AND status = 'COMPLETED'
+                """,
+                (now, now, appointment_id),
+            )
         connection.commit()
 
-        if cursor.rowcount == 0:
-            return jsonify({"error": "Appointment not found or unauthorized"}), 404
-
         return jsonify({
-            "message": "Appointment cancelled successfully",
             "appointment_id": appointment_id,
-            "status": "Cancelled"
+            "status": "Cancelled",
+            "refund_requested": refund_requested,
+            "message": "Appointment cancelled; refund queued for manual processing." if refund_requested else "Appointment cancelled successfully"
         }), 200
     finally:
         connection.close()
