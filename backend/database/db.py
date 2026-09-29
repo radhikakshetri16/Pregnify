@@ -2,13 +2,14 @@ import sqlite3
 import os
 from pathlib import Path
 
-DATABASE_PATH = Path(
-    os.getenv("PREGNIFY_DATABASE_PATH", Path(__file__).resolve().parent / "pregnify.db")
-)
+def get_database_path():
+    return Path(
+        os.getenv("PREGNIFY_DATABASE_PATH", Path(__file__).resolve().parent / "pregnify.db")
+    )
 
 
 def get_db_connection():
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = sqlite3.connect(get_database_path())
 
     # Return rows that behave like dictionaries
     connection.row_factory = sqlite3.Row
@@ -23,14 +24,20 @@ def ensure_payment_schema():
     """Apply the small, idempotent payment migration to existing databases."""
     connection = get_db_connection()
     try:
-        appointment_columns = {
+        tables = {
             row["name"]
-            for row in connection.execute("PRAGMA table_info(APPOINTMENT)").fetchall()
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
-        if "payment_status" not in appointment_columns:
-            connection.execute(
-                "ALTER TABLE APPOINTMENT ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED'"
-            )
+        if "APPOINTMENT" in tables:
+            appointment_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(APPOINTMENT)").fetchall()
+            }
+            if "payment_status" not in appointment_columns:
+                connection.execute(
+                    "ALTER TABLE APPOINTMENT ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED'"
+                )
+
 
         connection.executescript(
             """
@@ -77,3 +84,36 @@ def ensure_payment_schema():
         connection.commit()
     finally:
         connection.close()
+
+
+def ensure_auth_schema():
+    """Apply password reset OTP schema to existing databases."""
+    connection = get_db_connection()
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS PASSWORD_RESET_OTP (
+                reset_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                email TEXT NOT NULL,
+                otp_hash TEXT NOT NULL,
+                reset_token TEXT,
+                expires_at DATETIME NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                verified INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0, 1)),
+                used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0, 1)),
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES USER(user_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_password_reset_email
+            ON PASSWORD_RESET_OTP(email);
+
+            CREATE INDEX IF NOT EXISTS idx_password_reset_token
+            ON PASSWORD_RESET_OTP(reset_token);
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+

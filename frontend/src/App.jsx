@@ -8,6 +8,9 @@ import AdminLayout from "./layouts/AdminLayout";
 // Public User Auth Pages
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
+import VerifyOtp from "./pages/VerifyOtp";
+import ResetPassword from "./pages/ResetPassword";
 
 // Public Doctor Auth Pages
 import DoctorLogin from "./pages/DoctorLogin";
@@ -52,6 +55,9 @@ function App() {
         {/* User Auth */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/verify-otp" element={<VerifyOtp />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* Doctor Auth */}
         <Route path="/doctor/login" element={<DoctorLogin />} />

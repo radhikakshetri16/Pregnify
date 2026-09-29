@@ -378,8 +378,14 @@ def decode_esewa_response(encoded):
     return json.loads(base64.b64decode(encoded + padding).decode("utf-8"))
 
 
+@payments_bp.route("/payments/esewa/callback", methods=["GET"])
 @payments_bp.route("/payments/esewa/callback/<int:payment_id>", methods=["GET"])
-def esewa_callback(payment_id):
+def esewa_callback(payment_id=None):
+    if payment_id is None:
+        try:
+            payment_id = int(request.args.get("payment_id", 0))
+        except (ValueError, TypeError):
+            payment_id = 0
     encoded = request.args.get("data", "")
     connection = get_db_connection()
     try:

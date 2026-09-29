@@ -1,4 +1,9 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Explicitly load .env from backend directory
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -14,7 +19,7 @@ from routes.medicines import medicines_bp
 from routes.reports import reports_bp
 from routes.settings import settings_bp
 from routes.payments import payments_bp
-from database.db import ensure_payment_schema
+from database.db import ensure_payment_schema, ensure_auth_schema
 
 
 app = Flask(__name__)
@@ -31,6 +36,7 @@ CORS(
     supports_credentials=True,
 )
 
+ensure_auth_schema()
 ensure_payment_schema()
 
 app.register_blueprint(auth_bp)

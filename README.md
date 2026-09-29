@@ -4,9 +4,11 @@ A web-based pregnancy health management application.
 
 ## Technology Stack
 
-- Frontend: React, Vite, Tailwind CSS, React Router, Lucide React
-- Backend: Python and Flask
-- Database: SQLite
+* **Frontend:** React, Vite, Tailwind CSS, React Router, Lucide React
+* **Backend:** Python, Flask
+* **Database:** SQLite
+* **Payment:** eSewa ePay v2 Sandbox
+* **Email:** Gmail SMTP
 
 ## Project Structure
 
@@ -16,21 +18,21 @@ Pregnify/
 └── backend/
 ```
 
-## Payment sandbox setup
+## Key Features
 
-Appointment checkout supports eSewa ePay v2. Configure the backend process with
-the variables documented in `backend/.env.example` before starting Flask. In
-sandbox mode, eSewa uses its published `EPAYTEST` UAT credential automatically;
-production eSewa credentials must always be supplied through environment
-variables and never frontend code.
+* Pregnancy and health tracking
+* Doctor appointment management
+* Medication and medical report management
+* Doctor and administrator management
+* eSewa sandbox payment integration
+* Email OTP-based password reset
 
-The backend must be reachable at `BACKEND_PUBLIC_URL` because eSewa redirects
-the browser to its verification callback. For local testing, keep the
-frontend and backend hostnames consistent (use `127.0.0.1` for both) so the
-HTTP-only login session cookie is sent correctly.
+## Configuration
 
-Run the payment tests from the backend directory:
+Backend environment variables are managed through:
 
-```powershell
-.\venv\Scripts\python.exe -m unittest discover -s tests -v
+```text
+backend/.env
 ```
+
+Use `backend/.env.example` as the configuration reference.

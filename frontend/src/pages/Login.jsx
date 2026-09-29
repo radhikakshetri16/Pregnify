@@ -1,14 +1,16 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const successMessage = location.state?.successMessage;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -67,6 +69,13 @@ function Login() {
           </p>
         </div>
 
+        {/* Success Alert */}
+        {successMessage && !error && (
+          <div className="mb-5 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
+            {successMessage}
+          </div>
+        )}
+
         {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-5">
 
@@ -89,9 +98,19 @@ function Login() {
 
           {/* Password */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Password
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Password
+              </label>
+
+              <button
+                type="button"
+                onClick={() => navigate("/forgot-password")}
+                className="text-xs font-medium text-pink-600 hover:text-pink-700 hover:underline"
+              >
+                Forgot Password?
+              </button>
+            </div>
 
             <input
               type="password"
@@ -144,3 +163,4 @@ function Login() {
 }
 
 export default Login;
+

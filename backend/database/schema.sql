@@ -336,3 +336,32 @@ CREATE INDEX IF NOT EXISTS idx_payment_status_expiry
 ON PAYMENT(status, expires_at);
 
 
+-- =========================================================
+-- 11. PASSWORD_RESET_OTP
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS PASSWORD_RESET_OTP (
+    reset_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    email TEXT NOT NULL,
+    otp_hash TEXT NOT NULL,
+    reset_token TEXT,
+    expires_at DATETIME NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    verified INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0, 1)),
+    used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0, 1)),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id)
+        REFERENCES USER(user_id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_email
+ON PASSWORD_RESET_OTP(email);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_token
+ON PASSWORD_RESET_OTP(reset_token);
+
+
+

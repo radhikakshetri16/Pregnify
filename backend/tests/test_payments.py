@@ -28,6 +28,7 @@ from routes.payments import amount_to_paisa, esewa_signature  # noqa: E402
 
 class PaymentFlowTests(unittest.TestCase):
     def setUp(self):
+        os.environ["PREGNIFY_DATABASE_PATH"] = str(TEST_DATABASE)
         if TEST_DATABASE.exists():
             TEST_DATABASE.unlink()
         connection = sqlite3.connect(TEST_DATABASE)
