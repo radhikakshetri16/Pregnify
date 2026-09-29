@@ -56,7 +56,7 @@ Your verification code is:
 
 {otp_code}
 
-This OTP will expire in 10 minutes.
+This OTP will expire in 1 minute.
 
 If you did not request a password reset, please ignore this email.
 
@@ -105,7 +105,7 @@ Pregnify Team
               <!-- Expiry Note -->
               <div style="background-color: #fff1f2; border-left: 4px solid #f43f5e; padding: 12px 16px; border-radius: 6px; margin: 24px 0;">
                 <p style="margin: 0; font-size: 13px; line-height: 18px; color: #9f1239;">
-                  ⏱ <strong>This code will expire in 10 minutes.</strong> For security reasons, please do not share this code with anyone.
+                  ⏱ <strong>This code will expire in 1 minute.</strong> For security reasons, please do not share this code with anyone.
                 </p>
               </div>
 

@@ -60,7 +60,7 @@ class PasswordResetFlowTests(unittest.TestCase):
 
     @patch("routes.auth.send_password_reset_otp_email")
     def test_forgot_password_success(self, mock_send_email):
-        """Registered email generates OTP, saves hashed in DB, and sends email."""
+        """Registered email generates 1-minute OTP, saves in DB, and sends email."""
         mock_send_email.return_value = True
 
         response = self.client.post(
@@ -71,6 +71,7 @@ class PasswordResetFlowTests(unittest.TestCase):
         data = response.get_json()
         self.assertIn("message", data)
         self.assertEqual(data["email"], self.user_email)
+        self.assertEqual(data["resends_remaining"], 2)
 
         # Check mock called
         mock_send_email.assert_called_once()
@@ -84,7 +85,7 @@ class PasswordResetFlowTests(unittest.TestCase):
         self.assertEqual(len(otp_code), 6)
         self.assertTrue(otp_code.isdigit())
 
-        # Verify DB entry
+        # Verify DB entry and exact 1-minute expiry
         conn = get_db_connection()
         record = conn.execute(
             "SELECT * FROM PASSWORD_RESET_OTP WHERE email = ?", (self.user_email,)
@@ -96,52 +97,216 @@ class PasswordResetFlowTests(unittest.TestCase):
         self.assertEqual(record["verified"], 0)
         self.assertEqual(record["used"], 0)
         self.assertEqual(record["attempts"], 0)
+        self.assertEqual(record["resend_count"], 0)
+        self.assertIsNone(record["locked_until"])
+
+        # Check expiry is approximately 60 seconds from creation
+        created_at = datetime.fromisoformat(record["created_at"])
+        expires_at = datetime.fromisoformat(record["expires_at"])
+        delta_seconds = (expires_at - created_at).total_seconds()
+        self.assertAlmostEqual(delta_seconds, 60, delta=2)
 
     @patch("routes.auth.send_password_reset_otp_email")
-    def test_forgot_password_cooldown(self, mock_send_email):
-        """Immediate second request triggers cooldown rate limit (429)."""
+    def test_cannot_resend_before_current_otp_expires(self, mock_send_email):
+        """Resend is rejected while the 1-minute OTP is still active."""
         mock_send_email.return_value = True
 
         res1 = self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
         self.assertEqual(res1.status_code, 200)
 
-        res2 = self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
-        self.assertEqual(res2.status_code, 429)
-        self.assertIn("wait", res2.get_json()["error"])
+        # Attempt immediate resend via resend endpoint
+        res2 = self.client.post("/api/auth/resend-reset-otp", json={"email": self.user_email})
+        self.assertEqual(res2.status_code, 400)
+        self.assertIn("wait until the current otp expires", res2.get_json()["error"].lower())
+
+        # Attempt immediate request via forgot-password endpoint
+        res3 = self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
+        self.assertEqual(res3.status_code, 400)
+        self.assertIn("wait until the current otp expires", res3.get_json()["error"].lower())
 
     @patch("routes.auth.send_password_reset_otp_email")
-    def test_verify_otp_wrong_code_and_lockout(self, mock_send_email):
-        """Incorrect OTP increments attempts and locks out after 5 failures."""
+    def test_resend_allowed_after_expiry_and_invalidates_previous(self, mock_send_email):
+        """After 1-minute expiry, user can resend OTP. Previous OTP is invalidated."""
+        mock_send_email.return_value = True
+
+        self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
+        first_otp = mock_send_email.call_args[1].get("otp_code") or mock_send_email.call_args[0][2]
+
+        # Simulate 1 minute expiry
+        conn = get_db_connection()
+        past_time = (datetime.now(timezone.utc) - timedelta(seconds=65)).isoformat()
+        conn.execute("UPDATE PASSWORD_RESET_OTP SET expires_at = ? WHERE email = ?", (past_time, self.user_email))
+        conn.commit()
+        conn.close()
+
+        # Resend OTP
+        res_resend = self.client.post("/api/auth/resend-reset-otp", json={"email": self.user_email})
+        self.assertEqual(res_resend.status_code, 200)
+        data = res_resend.get_json()
+        self.assertEqual(data["resends_remaining"], 1)
+        second_otp = mock_send_email.call_args[1].get("otp_code") or mock_send_email.call_args[0][2]
+
+        # Old OTP must not work
+        res_old = self.client.post(
+            "/api/auth/verify-reset-otp",
+            json={"email": self.user_email, "otp": first_otp}
+        )
+        if first_otp != second_otp:
+            self.assertEqual(res_old.status_code, 400)
+
+        # New OTP works
+        res_new = self.client.post(
+            "/api/auth/verify-reset-otp",
+            json={"email": self.user_email, "otp": second_otp}
+        )
+        self.assertEqual(res_new.status_code, 200)
+        self.assertIn("reset_token", res_new.get_json())
+
+    @patch("routes.auth.send_password_reset_otp_email")
+    def test_maximum_2_resends_enforced(self, mock_send_email):
+        """User can resend an OTP a maximum of 2 times only (Initial + Resend 1 + Resend 2). Resend 3 blocked."""
+        mock_send_email.return_value = True
+
+        # Initial OTP
+        res0 = self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
+        self.assertEqual(res0.status_code, 200)
+        self.assertEqual(res0.get_json()["resends_remaining"], 2)
+
+        # Expire and Resend #1
+        conn = get_db_connection()
+        past_time = (datetime.now(timezone.utc) - timedelta(seconds=65)).isoformat()
+        conn.execute("UPDATE PASSWORD_RESET_OTP SET expires_at = ? WHERE email = ?", (past_time, self.user_email))
+        conn.commit()
+        conn.close()
+
+        res1 = self.client.post("/api/auth/resend-reset-otp", json={"email": self.user_email})
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res1.get_json()["resends_remaining"], 1)
+
+        # Expire and Resend #2
+        conn = get_db_connection()
+        conn.execute("UPDATE PASSWORD_RESET_OTP SET expires_at = ? WHERE email = ?", (past_time, self.user_email))
+        conn.commit()
+        conn.close()
+
+        res2 = self.client.post("/api/auth/resend-reset-otp", json={"email": self.user_email})
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res2.get_json()["resends_remaining"], 0)
+
+        # Expire and attempt Resend #3 -> Rejected
+        conn = get_db_connection()
+        conn.execute("UPDATE PASSWORD_RESET_OTP SET expires_at = ? WHERE email = ?", (past_time, self.user_email))
+        conn.commit()
+        conn.close()
+
+        res3 = self.client.post("/api/auth/resend-reset-otp", json={"email": self.user_email})
+        self.assertEqual(res3.status_code, 400)
+        self.assertIn("maximum otp resend limit", res3.get_json()["error"].lower())
+
+    @patch("routes.auth.send_password_reset_otp_email")
+    def test_verify_otp_wrong_code_and_24h_lockout(self, mock_send_email):
+        """2 incorrect OTP verification attempts triggers 24-hour lockout."""
         mock_send_email.return_value = True
         self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
 
-        # Try wrong OTP 4 times
-        for i in range(1, 5):
-            res = self.client.post(
-                "/api/auth/verify-reset-otp",
-                json={"email": self.user_email, "otp": "000000"}
-            )
-            self.assertEqual(res.status_code, 400)
-            self.assertIn(f"{5 - i} attempt", res.get_json()["error"])
-
-        # 5th failed attempt triggers maximum attempts reached
-        res5 = self.client.post(
+        # Attempt 1: Wrong OTP -> 1 attempt remaining
+        res1 = self.client.post(
             "/api/auth/verify-reset-otp",
             json={"email": self.user_email, "otp": "000000"}
         )
-        self.assertEqual(res5.status_code, 400)
-        self.assertIn("maximum", res5.get_json()["error"].lower())
+        self.assertEqual(res1.status_code, 400)
+        self.assertEqual(res1.get_json()["error"], "Invalid OTP. 1 attempt remaining.")
+
+        # Attempt 2: Wrong OTP -> 24-hour lockout!
+        res2 = self.client.post(
+            "/api/auth/verify-reset-otp",
+            json={"email": self.user_email, "otp": "000000"}
+        )
+        self.assertEqual(res2.status_code, 400)
+        self.assertIn("locked for 24 hours", res2.get_json()["error"].lower())
+
+        # Verify DB reflects lockout
+        conn = get_db_connection()
+        record = conn.execute("SELECT * FROM PASSWORD_RESET_OTP WHERE email = ?", (self.user_email,)).fetchone()
+        conn.close()
+        self.assertEqual(record["used"], 1)
+        self.assertEqual(record["attempts"], 2)
+        self.assertIsNotNone(record["locked_until"])
+
+    @patch("routes.auth.send_password_reset_otp_email")
+    def test_lockout_blocks_all_password_reset_operations(self, mock_send_email):
+        """During the 24-hour lock period, all password reset endpoints are blocked."""
+        mock_send_email.return_value = True
+        self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
+
+        # Trigger 24-hour lock with 2 wrong attempts
+        self.client.post("/api/auth/verify-reset-otp", json={"email": self.user_email, "otp": "000000"})
+        self.client.post("/api/auth/verify-reset-otp", json={"email": self.user_email, "otp": "000000"})
+
+        # Try /forgot-password
+        res_forgot = self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
+        self.assertEqual(res_forgot.status_code, 403)
+        self.assertIn("temporarily locked", res_forgot.get_json()["error"].lower())
+
+        # Try /verify-reset-otp
+        res_verify = self.client.post("/api/auth/verify-reset-otp", json={"email": self.user_email, "otp": "123456"})
+        self.assertEqual(res_verify.status_code, 403)
+        self.assertIn("temporarily locked", res_verify.get_json()["error"].lower())
+
+        # Try /resend-reset-otp
+        res_resend = self.client.post("/api/auth/resend-reset-otp", json={"email": self.user_email})
+        self.assertEqual(res_resend.status_code, 403)
+        self.assertIn("temporarily locked", res_resend.get_json()["error"].lower())
+
+        # Try /reset-password
+        res_reset = self.client.post(
+            "/api/auth/reset-password",
+            json={
+                "email": self.user_email,
+                "reset_token": "fake-token",
+                "new_password": "NewPassword123!",
+                "confirm_password": "NewPassword123!"
+            }
+        )
+        self.assertEqual(res_reset.status_code, 403)
+        self.assertIn("temporarily locked", res_reset.get_json()["error"].lower())
+
+    @patch("routes.auth.send_password_reset_otp_email")
+    def test_failed_attempts_carried_across_resends(self, mock_send_email):
+        """Failed attempts persist across OTP resends and cannot be bypassed by requesting a new OTP."""
+        mock_send_email.return_value = True
+        self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
+
+        # 1st wrong attempt on initial OTP
+        res1 = self.client.post("/api/auth/verify-reset-otp", json={"email": self.user_email, "otp": "000000"})
+        self.assertEqual(res1.status_code, 400)
+        self.assertEqual(res1.get_json()["error"], "Invalid OTP. 1 attempt remaining.")
+
+        # Expire OTP and resend
+        conn = get_db_connection()
+        past_time = (datetime.now(timezone.utc) - timedelta(seconds=65)).isoformat()
+        conn.execute("UPDATE PASSWORD_RESET_OTP SET expires_at = ? WHERE email = ?", (past_time, self.user_email))
+        conn.commit()
+        conn.close()
+
+        res_resend = self.client.post("/api/auth/resend-reset-otp", json={"email": self.user_email})
+        self.assertEqual(res_resend.status_code, 200)
+
+        # 1st wrong attempt on resent OTP is the 2nd overall wrong attempt -> Locks for 24 hours!
+        res2 = self.client.post("/api/auth/verify-reset-otp", json={"email": self.user_email, "otp": "000000"})
+        self.assertEqual(res2.status_code, 400)
+        self.assertIn("locked for 24 hours", res2.get_json()["error"].lower())
 
     @patch("routes.auth.send_password_reset_otp_email")
     def test_verify_otp_expired(self, mock_send_email):
-        """Expired OTP is rejected."""
+        """Expired OTP is rejected with 'OTP has expired. Please request a new OTP.' and does not count as wrong attempt."""
         mock_send_email.return_value = True
         self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
         otp = mock_send_email.call_args[1].get("otp_code") or mock_send_email.call_args[0][2]
 
-        # Manually expire in DB
+        # Manually expire in DB (past 60s)
         conn = get_db_connection()
-        past_time = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+        past_time = (datetime.now(timezone.utc) - timedelta(seconds=70)).isoformat()
         conn.execute("UPDATE PASSWORD_RESET_OTP SET expires_at = ? WHERE email = ?", (past_time, self.user_email))
         conn.commit()
         conn.close()
@@ -151,46 +316,17 @@ class PasswordResetFlowTests(unittest.TestCase):
             json={"email": self.user_email, "otp": otp}
         )
         self.assertEqual(res.status_code, 400)
-        self.assertIn("expired", res.get_json()["error"].lower())
+        self.assertEqual(res.get_json()["error"], "OTP has expired. Please request a new OTP.")
 
-    @patch("routes.auth.send_password_reset_otp_email")
-    def test_resend_otp_invalidates_previous(self, mock_send_email):
-        """Resending OTP creates a fresh OTP and invalidates previous OTP."""
-        mock_send_email.return_value = True
-        self.client.post("/api/auth/forgot-password", json={"email": self.user_email})
-        first_otp = mock_send_email.call_args[1].get("otp_code") or mock_send_email.call_args[0][2]
-
-        # Age the first OTP record so cooldown passes
+        # Ensure failed attempt was NOT incremented to 1
         conn = get_db_connection()
-        past_created = (datetime.now(timezone.utc) - timedelta(seconds=35)).isoformat()
-        conn.execute("UPDATE PASSWORD_RESET_OTP SET created_at = ? WHERE email = ?", (past_created, self.user_email))
-        conn.commit()
+        record = conn.execute("SELECT * FROM PASSWORD_RESET_OTP WHERE email = ?", (self.user_email,)).fetchone()
         conn.close()
-
-        # Resend OTP
-        res = self.client.post("/api/auth/resend-reset-otp", json={"email": self.user_email})
-        self.assertEqual(res.status_code, 200)
-        second_otp = mock_send_email.call_args[1].get("otp_code") or mock_send_email.call_args[0][2]
-
-        # Trying old first OTP should fail
-        res_old = self.client.post(
-            "/api/auth/verify-reset-otp",
-            json={"email": self.user_email, "otp": first_otp}
-        )
-        if first_otp != second_otp:
-            self.assertEqual(res_old.status_code, 400)
-
-        # Trying second OTP succeeds
-        res_new = self.client.post(
-            "/api/auth/verify-reset-otp",
-            json={"email": self.user_email, "otp": second_otp}
-        )
-        self.assertEqual(res_new.status_code, 200)
-        self.assertIn("reset_token", res_new.get_json())
+        self.assertEqual(record["attempts"], 0)
 
     @patch("routes.auth.send_password_reset_otp_email")
     def test_complete_reset_flow_and_login(self, mock_send_email):
-        """End-to-end: Request OTP -> Verify OTP -> Reset Password -> Login with new password."""
+        """End-to-end: Request OTP -> Verify OTP within 1 min -> Reset Password -> Login with new password."""
         mock_send_email.return_value = True
 
         # 1. Request OTP
@@ -198,7 +334,7 @@ class PasswordResetFlowTests(unittest.TestCase):
         self.assertEqual(res_req.status_code, 200)
         otp = mock_send_email.call_args[1].get("otp_code") or mock_send_email.call_args[0][2]
 
-        # 2. Verify OTP
+        # 2. Verify OTP within 1 minute
         res_ver = self.client.post("/api/auth/verify-reset-otp", json={"email": self.user_email, "otp": otp})
         self.assertEqual(res_ver.status_code, 200)
         reset_token = res_ver.get_json()["reset_token"]

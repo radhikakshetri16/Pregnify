@@ -38,7 +38,10 @@ function ForgotPassword() {
 
       // Navigate to OTP verification page with the email in state
       navigate("/verify-otp", {
-        state: { email: email.trim() },
+        state: {
+          email: email.trim(),
+          resends_remaining: data.resends_remaining,
+        },
       });
     } catch (err) {
       console.error("Forgot password request error:", err);

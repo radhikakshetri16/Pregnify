@@ -100,6 +100,8 @@ def ensure_auth_schema():
                 reset_token TEXT,
                 expires_at DATETIME NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0,
+                resend_count INTEGER NOT NULL DEFAULT 0,
+                locked_until DATETIME,
                 verified INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0, 1)),
                 used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0, 1)),
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -113,6 +115,12 @@ def ensure_auth_schema():
             ON PASSWORD_RESET_OTP(reset_token);
             """
         )
+        # Check and apply migrations for missing columns in existing databases
+        columns = [row["name"] for row in connection.execute("PRAGMA table_info(PASSWORD_RESET_OTP)").fetchall()]
+        if "resend_count" not in columns:
+            connection.execute("ALTER TABLE PASSWORD_RESET_OTP ADD COLUMN resend_count INTEGER NOT NULL DEFAULT 0")
+        if "locked_until" not in columns:
+            connection.execute("ALTER TABLE PASSWORD_RESET_OTP ADD COLUMN locked_until DATETIME")
         connection.commit()
     finally:
         connection.close()

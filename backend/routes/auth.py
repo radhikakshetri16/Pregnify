@@ -347,10 +347,36 @@ def parse_iso_datetime(dt_str: str) -> datetime:
         return datetime.now(timezone.utc)
 
 
+def get_active_account_lock(connection, email: str):
+    """
+    Check if password reset is currently locked for this email.
+    Returns (is_locked: bool, locked_until_dt: datetime or None).
+    """
+    row = connection.execute(
+        """
+        SELECT locked_until FROM PASSWORD_RESET_OTP
+        WHERE LOWER(email) = LOWER(?) AND locked_until IS NOT NULL
+        ORDER BY reset_id DESC LIMIT 1
+        """,
+        (email.strip().lower(),)
+    ).fetchone()
+
+    if not row or not row["locked_until"]:
+        return False, None
+
+    locked_until_dt = parse_iso_datetime(row["locked_until"])
+    now_dt = datetime.now(timezone.utc)
+    if now_dt < locked_until_dt:
+        return True, locked_until_dt
+    return False, None
+
+
 @auth_bp.route("/forgot-password", methods=["POST"])
 def forgot_password():
     """
     Step 1: User enters registered email to receive a 6-digit OTP.
+    OTP validity: exactly 1 minute (60 seconds).
+    Resend limit: max 2 resends per reset attempt.
     """
     data = request.get_json() or {}
     email = data.get("email", "").strip().lower()
@@ -368,45 +394,72 @@ def forgot_password():
         if not user:
             return jsonify({"error": "No account found with this email address."}), 404
 
-        # Rate limit / cooldown: check if an OTP was generated within the last 30 seconds
-        recent_otp = connection.execute(
+        # Check 24-hour lockout
+        is_locked, _ = get_active_account_lock(connection, email)
+        if is_locked:
+            return jsonify({
+                "error": "Password reset is temporarily locked. Please try again after 24 hours."
+            }), 403
+
+        # Check existing active OTP for this email
+        active_otp = connection.execute(
             """
-            SELECT created_at FROM PASSWORD_RESET_OTP
-            WHERE email = ? AND used = 0
+            SELECT * FROM PASSWORD_RESET_OTP
+            WHERE LOWER(email) = ? AND verified = 0 AND used = 0
             ORDER BY reset_id DESC LIMIT 1
             """,
             (email,)
         ).fetchone()
 
-        if recent_otp:
-            created_at_dt = parse_iso_datetime(recent_otp["created_at"])
-            elapsed_seconds = (datetime.now(timezone.utc) - created_at_dt).total_seconds()
-            if elapsed_seconds < 30:
-                remaining = int(30 - elapsed_seconds)
+        resend_count = 0
+        attempts = 0
+
+        if active_otp:
+            now_dt = datetime.now(timezone.utc)
+            expires_at_dt = parse_iso_datetime(active_otp["expires_at"])
+
+            # Rule 3: Cannot resend/request new OTP before current OTP expires
+            if now_dt < expires_at_dt:
                 return jsonify({
-                    "error": f"Please wait {remaining} seconds before requesting a new OTP."
-                }), 429
+                    "error": "Please wait until the current OTP expires before requesting a new one."
+                }), 400
 
-        # Invalidate any prior active OTPs for this email
-        connection.execute(
-            "UPDATE PASSWORD_RESET_OTP SET used = 1 WHERE email = ? AND used = 0",
-            (email,)
-        )
+            # Current OTP expired, treat as resend request
+            current_resend_count = active_otp["resend_count"] if "resend_count" in active_otp.keys() else 0
+            if current_resend_count >= 2:
+                return jsonify({
+                    "error": "You have reached the maximum OTP resend limit."
+                }), 400
 
-        # Generate secure 6-digit OTP
+            resend_count = current_resend_count + 1
+            attempts = active_otp["attempts"]  # Carry over failed attempts across resends
+
+            # Invalidate previous OTP
+            connection.execute(
+                "UPDATE PASSWORD_RESET_OTP SET used = 1 WHERE reset_id = ?",
+                (active_otp["reset_id"],)
+            )
+        else:
+            # Invalidate any lingering inactive records
+            connection.execute(
+                "UPDATE PASSWORD_RESET_OTP SET used = 1 WHERE LOWER(email) = ? AND used = 0",
+                (email,)
+            )
+
+        # Generate secure 6-digit OTP (expires in exactly 1 minute)
         otp_code = f"{secrets.randbelow(1000000):06d}"
         otp_hash = generate_password_hash(otp_code)
         now_dt = datetime.now(timezone.utc)
         now_iso = now_dt.isoformat()
-        expires_at_iso = (now_dt + timedelta(minutes=10)).isoformat()
+        expires_at_iso = (now_dt + timedelta(seconds=60)).isoformat()
 
         connection.execute(
             """
             INSERT INTO PASSWORD_RESET_OTP (
-                user_id, email, otp_hash, expires_at, attempts, verified, used, created_at
-            ) VALUES (?, ?, ?, ?, 0, 0, 0, ?)
+                user_id, email, otp_hash, expires_at, attempts, resend_count, locked_until, verified, used, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, ?)
             """,
-            (user["user_id"], email, otp_hash, expires_at_iso, now_iso)
+            (user["user_id"], email, otp_hash, expires_at_iso, attempts, resend_count, now_iso)
         )
         connection.commit()
 
@@ -424,7 +477,8 @@ def forgot_password():
 
         return jsonify({
             "message": "OTP sent successfully to your registered Gmail address.",
-            "email": email
+            "email": email,
+            "resends_remaining": max(0, 2 - resend_count)
         }), 200
 
     finally:
@@ -435,7 +489,9 @@ def forgot_password():
 def verify_reset_otp():
     """
     Step 2: User verifies 6-digit OTP.
-    Returns a secure temporary reset token upon successful verification.
+    - Exactly 1 minute expiration.
+    - Maximum 2 incorrect OTP attempts -> 24 hour lockout.
+    - Returns a secure temporary reset token upon successful verification.
     """
     data = request.get_json() or {}
     email = data.get("email", "").strip().lower()
@@ -449,11 +505,18 @@ def verify_reset_otp():
 
     connection = get_db_connection()
     try:
+        # Check 24-hour lockout
+        is_locked, _ = get_active_account_lock(connection, email)
+        if is_locked:
+            return jsonify({
+                "error": "Password reset is temporarily locked. Please try again after 24 hours."
+            }), 403
+
         # Find latest active OTP record for this email
         record = connection.execute(
             """
             SELECT * FROM PASSWORD_RESET_OTP
-            WHERE email = ? AND verified = 0 AND used = 0
+            WHERE LOWER(email) = ? AND verified = 0 AND used = 0
             ORDER BY reset_id DESC LIMIT 1
             """,
             (email,)
@@ -464,55 +527,51 @@ def verify_reset_otp():
                 "error": "No active password reset request found. Please request a new OTP."
             }), 400
 
-        # Check maximum failed attempts
-        if record["attempts"] >= 5:
-            connection.execute(
-                "UPDATE PASSWORD_RESET_OTP SET used = 1 WHERE reset_id = ?",
-                (record["reset_id"],)
-            )
-            connection.commit()
-            return jsonify({
-                "error": "Maximum verification attempts exceeded (5/5). Please request a new OTP."
-            }), 400
-
-        # Check OTP expiration (10 minutes)
         now_dt = datetime.now(timezone.utc)
+
+        # Check OTP expiration (1 minute = 60 seconds)
         expires_at_dt = parse_iso_datetime(record["expires_at"])
-        if now_dt > expires_at_dt:
+        if now_dt >= expires_at_dt:
             connection.execute(
                 "UPDATE PASSWORD_RESET_OTP SET used = 1 WHERE reset_id = ?",
                 (record["reset_id"],)
             )
             connection.commit()
             return jsonify({
-                "error": "OTP has expired. Please request a new code."
+                "error": "OTP has expired. Please request a new OTP."
             }), 400
 
         # Verify OTP securely
         if not check_password_hash(record["otp_hash"], otp):
             new_attempts = record["attempts"] + 1
-            remaining = max(0, 5 - new_attempts)
 
-            if new_attempts >= 5:
+            if new_attempts >= 2:
+                # 2nd wrong attempt: Invalidate reset session and lock account for 24 hours
+                lock_until_iso = (now_dt + timedelta(hours=24)).isoformat()
                 connection.execute(
-                    "UPDATE PASSWORD_RESET_OTP SET attempts = ?, used = 1 WHERE reset_id = ?",
-                    (new_attempts, record["reset_id"])
+                    """
+                    UPDATE PASSWORD_RESET_OTP
+                    SET attempts = ?, used = 1, locked_until = ?
+                    WHERE reset_id = ?
+                    """,
+                    (new_attempts, lock_until_iso, record["reset_id"])
                 )
                 connection.commit()
                 return jsonify({
-                    "error": "Invalid OTP. You have reached the maximum 5 attempts. Please request a new OTP."
+                    "error": "Too many incorrect OTP attempts. Password reset has been locked for 24 hours."
                 }), 400
             else:
+                # 1st wrong attempt
                 connection.execute(
                     "UPDATE PASSWORD_RESET_OTP SET attempts = ? WHERE reset_id = ?",
                     (new_attempts, record["reset_id"])
                 )
                 connection.commit()
                 return jsonify({
-                    "error": f"Invalid OTP. {remaining} attempt{'s' if remaining != 1 else ''} remaining."
+                    "error": "Invalid OTP. 1 attempt remaining."
                 }), 400
 
-        # Verification successful -> Generate secure temporary reset token
+        # Verification successful -> Generate secure temporary reset token (15 mins)
         reset_token = secrets.token_urlsafe(32)
         token_expires_at = (now_dt + timedelta(minutes=15)).isoformat()
 
@@ -538,7 +597,11 @@ def verify_reset_otp():
 @auth_bp.route("/resend-reset-otp", methods=["POST"])
 def resend_reset_otp():
     """
-    Resend a fresh OTP: invalidates prior OTPs, checks cooldown, and sends new OTP.
+    Resend a fresh OTP:
+    - User cannot resend before the current OTP expires (1 minute).
+    - Maximum 2 resends allowed per reset attempt.
+    - Invalidates prior OTPs.
+    - Carries forward failed-attempt count.
     """
     data = request.get_json() or {}
     email = data.get("email", "").strip().lower()
@@ -556,45 +619,66 @@ def resend_reset_otp():
         if not user:
             return jsonify({"error": "No account found with this email address."}), 404
 
-        # Rate limit cooldown (30 seconds)
-        recent_otp = connection.execute(
+        # Check 24-hour lockout
+        is_locked, _ = get_active_account_lock(connection, email)
+        if is_locked:
+            return jsonify({
+                "error": "Password reset is temporarily locked. Please try again after 24 hours."
+            }), 403
+
+        # Find latest unverified OTP record
+        latest_record = connection.execute(
             """
-            SELECT created_at FROM PASSWORD_RESET_OTP
-            WHERE email = ?
+            SELECT * FROM PASSWORD_RESET_OTP
+            WHERE LOWER(email) = ? AND verified = 0
             ORDER BY reset_id DESC LIMIT 1
             """,
             (email,)
         ).fetchone()
 
-        if recent_otp:
-            created_at_dt = parse_iso_datetime(recent_otp["created_at"])
-            elapsed_seconds = (datetime.now(timezone.utc) - created_at_dt).total_seconds()
-            if elapsed_seconds < 30:
-                remaining = int(30 - elapsed_seconds)
-                return jsonify({
-                    "error": f"Please wait {remaining} seconds before requesting a new OTP."
-                }), 429
+        if not latest_record:
+            return jsonify({
+                "error": "No active password reset request found. Please request an OTP first."
+            }), 400
+
+        now_dt = datetime.now(timezone.utc)
+        expires_at_dt = parse_iso_datetime(latest_record["expires_at"])
+
+        # Check if current OTP is still active (< 1 minute)
+        if latest_record["used"] == 0 and now_dt < expires_at_dt:
+            return jsonify({
+                "error": "Please wait until the current OTP expires before requesting a new one."
+            }), 400
+
+        # Check resend limit (maximum 2 resends)
+        current_resend_count = latest_record["resend_count"] if "resend_count" in latest_record.keys() else 0
+        if current_resend_count >= 2:
+            return jsonify({
+                "error": "You have reached the maximum OTP resend limit."
+            }), 400
+
+        carried_attempts = latest_record["attempts"]
+        new_resend_count = current_resend_count + 1
 
         # Invalidate all prior OTP records for this email
         connection.execute(
-            "UPDATE PASSWORD_RESET_OTP SET used = 1 WHERE email = ? AND used = 0",
+            "UPDATE PASSWORD_RESET_OTP SET used = 1 WHERE LOWER(email) = ? AND used = 0",
             (email,)
         )
 
-        # Generate fresh 6-digit OTP
+        # Generate fresh 6-digit OTP (expires in exactly 1 minute)
         otp_code = f"{secrets.randbelow(1000000):06d}"
         otp_hash = generate_password_hash(otp_code)
-        now_dt = datetime.now(timezone.utc)
         now_iso = now_dt.isoformat()
-        expires_at_iso = (now_dt + timedelta(minutes=10)).isoformat()
+        expires_at_iso = (now_dt + timedelta(seconds=60)).isoformat()
 
         connection.execute(
             """
             INSERT INTO PASSWORD_RESET_OTP (
-                user_id, email, otp_hash, expires_at, attempts, verified, used, created_at
-            ) VALUES (?, ?, ?, ?, 0, 0, 0, ?)
+                user_id, email, otp_hash, expires_at, attempts, resend_count, locked_until, verified, used, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, ?)
             """,
-            (user["user_id"], email, otp_hash, expires_at_iso, now_iso)
+            (user["user_id"], email, otp_hash, expires_at_iso, carried_attempts, new_resend_count, now_iso)
         )
         connection.commit()
 
@@ -612,7 +696,8 @@ def resend_reset_otp():
 
         return jsonify({
             "message": "A fresh OTP has been sent to your registered Gmail address.",
-            "email": email
+            "email": email,
+            "resends_remaining": max(0, 2 - new_resend_count)
         }), 200
 
     finally:
@@ -648,6 +733,14 @@ def reset_password():
 
     connection = get_db_connection()
     try:
+        # Check active lockout if email provided
+        if email:
+            is_locked, _ = get_active_account_lock(connection, email)
+            if is_locked:
+                return jsonify({
+                    "error": "Password reset is temporarily locked. Please try again after 24 hours."
+                }), 403
+
         # Find active verified reset record by token
         record = connection.execute(
             """
@@ -667,6 +760,13 @@ def reset_password():
             return jsonify({
                 "error": "Reset session token does not match the provided email."
             }), 400
+
+        # Check account lock on the record's email
+        is_locked, _ = get_active_account_lock(connection, record["email"])
+        if is_locked:
+            return jsonify({
+                "error": "Password reset is temporarily locked. Please try again after 24 hours."
+            }), 403
 
         # Check token expiration
         now_dt = datetime.now(timezone.utc)
