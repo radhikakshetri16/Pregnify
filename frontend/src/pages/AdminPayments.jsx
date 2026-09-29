@@ -11,7 +11,7 @@ const formatAmount = (paisa) =>
 
 function AdminPayments() {
   const [payments, setPayments] = useState([]);
-  const [filter, setFilter] = useState("REFUND_REQUESTED");
+  const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -80,11 +80,12 @@ function AdminPayments() {
             onChange={(event) => setFilter(event.target.value)}
             className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
           >
-            <option value="REFUND_REQUESTED">Refund requested</option>
+            <option value="">All payments</option>
             <option value="COMPLETED">Completed</option>
             <option value="REFUNDED">Refunded</option>
             <option value="PENDING">Pending</option>
-            <option value="">All payments</option>
+            <option value="REFUND_REQUESTED">Refund requested</option>
+         
           </select>
           <button onClick={loadPayments} className="rounded-xl border border-gray-200 bg-white p-2.5 text-gray-600 hover:bg-gray-50">
             <RefreshCw size={17} />
