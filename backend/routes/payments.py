@@ -57,22 +57,48 @@ def amount_to_npr(amount_paisa):
     return f"{Decimal(amount_paisa) / Decimal(100):.2f}"
 
 
-def json_request(url, method="GET", payload=None, headers=None, timeout=15):
+def json_request(url, method="GET", payload=None, headers=None, timeout=15, retries=3):
+    """Make a JSON request with retries for temporary network/DNS failures."""
     body = json.dumps(payload).encode("utf-8") if payload is not None else None
     request_headers = {"Accept": "application/json", **(headers or {})}
     if body is not None:
         request_headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as err:
-        raw = err.read().decode("utf-8", errors="replace")
+
+    last_error = None
+    for attempt in range(1, retries + 1):
+        req = urllib.request.Request(
+            url, data=body, headers=request_headers, method=method
+        )
         try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            parsed = {"error": raw or "Payment provider request failed"}
-        return err.code, parsed
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return response.status, json.loads(
+                    response.read().decode("utf-8")
+                )
+        except urllib.error.HTTPError as err:
+            raw = err.read().decode("utf-8", errors="replace")
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = {"error": raw or "Payment provider request failed"}
+            return err.code, parsed
+        except urllib.error.URLError as err:
+            last_error = err
+            print(
+                f"[eSewa] Network error on attempt {attempt}/{retries}: {err}"
+            )
+            if attempt < retries:
+                import time
+                time.sleep(1)
+        except TimeoutError as err:
+            last_error = err
+            print(
+                f"[eSewa] Timeout on attempt {attempt}/{retries}: {err}"
+            )
+            if attempt < retries:
+                import time
+                time.sleep(1)
+
+    raise last_error or urllib.error.URLError("Payment provider request failed")
 
 
 def expire_payment_holds(connection):
@@ -125,20 +151,32 @@ def esewa_signature(fields, signed_field_names, secret):
 
 def esewa_config():
     environment = os.getenv("PAYMENT_ENV", "sandbox").lower()
-    # EPAYTEST uses eSewa's published UAT credential. Live credentials must
-    # always be supplied by the merchant through environment variables.
-    sandbox_secret = "8gBm/:&EnhH.1/q" if environment == "sandbox" else ""
-    product_code = os.getenv("ESEWA_PRODUCT_CODE", "EPAYTEST" if environment == "sandbox" else "").strip()
-    secret = os.getenv("ESEWA_SECRET_KEY", sandbox_secret).strip()
+
+    product_code = os.getenv(
+        "ESEWA_PRODUCT_CODE",
+        "EPAYTEST" if environment == "sandbox" else ""
+    ).strip()
+
+    # Never hard-code the eSewa secret in source code.
+    # It must come from backend/.env or the deployment environment.
+    secret = os.getenv("ESEWA_SECRET_KEY", "").strip()
+
     if not product_code or not secret:
         return None, "eSewa merchant credentials are not configured"
+
     if environment == "sandbox":
         form_url = "https://rc-epay.esewa.com.np/api/epay/main/v2/form"
         status_url = "https://rc.esewa.com.np/api/epay/transaction/status/"
     else:
         form_url = "https://epay.esewa.com.np/api/epay/main/v2/form"
         status_url = "https://esewa.com.np/api/epay/transaction/status/"
-    return {"secret": secret, "product_code": product_code, "form_url": form_url, "status_url": status_url}, None
+
+    return {
+        "secret": secret,
+        "product_code": product_code,
+        "form_url": form_url,
+        "status_url": status_url,
+    }, None
 
 
 def initiate_esewa(payment, config):
@@ -151,8 +189,8 @@ def initiate_esewa(payment, config):
         "product_code": config["product_code"],
         "product_service_charge": "0",
         "product_delivery_charge": "0",
-        "success_url": backend_url(f"/api/payments/esewa/callback?payment_id={payment['payment_id']}"),
-        "failure_url": backend_url(f"/api/payments/esewa/failure?payment_id={payment['payment_id']}"),
+        "success_url": backend_url(f"/api/payments/esewa/callback/{payment['payment_id']}"),
+        "failure_url": backend_url(f"/api/payments/esewa/failure/{payment['payment_id']}"),
         "signed_field_names": "total_amount,transaction_uuid,product_code",
     }
     fields["signature"] = esewa_signature(fields, fields["signed_field_names"], config["secret"])
@@ -340,44 +378,159 @@ def decode_esewa_response(encoded):
     return json.loads(base64.b64decode(encoded + padding).decode("utf-8"))
 
 
-@payments_bp.route("/payments/esewa/callback", methods=["GET"])
-def esewa_callback():
-    payment_id = request.args.get("payment_id", type=int)
+@payments_bp.route("/payments/esewa/callback/<int:payment_id>", methods=["GET"])
+def esewa_callback(payment_id):
     encoded = request.args.get("data", "")
     connection = get_db_connection()
     try:
-        payment = connection.execute("SELECT * FROM PAYMENT WHERE payment_id = ? AND provider = 'ESEWA'", (payment_id,)).fetchone()
+        print(
+            f"[eSewa callback] payment_id={payment_id}, "
+            f"has_data={bool(encoded)}"
+        )
+        payment = connection.execute(
+            "SELECT * FROM PAYMENT WHERE payment_id = ? AND provider = 'ESEWA'",
+            (payment_id,),
+        ).fetchone()
         if not payment or not encoded:
-            return redirect(frontend_url("invalid", payment_id or 0))
+            return redirect(frontend_url("invalid", payment_id))
+
         config, error = esewa_config()
         if error:
             return redirect(frontend_url("verification-error", payment_id))
+
+        # First verify the signed callback itself. This is the important
+        # cryptographic verification and must succeed before any fallback.
         try:
             response = decode_esewa_response(encoded)
+            print(f"[eSewa callback] Decoded response: {response}")
             signed_names = response.get("signed_field_names", "")
-            expected = esewa_signature(response, signed_names, config["secret"])
-            valid_signature = hmac.compare_digest(expected, response.get("signature", ""))
-            valid_identity = response.get("transaction_uuid") == payment["merchant_transaction_id"] and response.get("product_code") == config["product_code"]
-            valid_amount = amount_to_paisa(response.get("total_amount")) == payment["amount_paisa"]
-            if not (valid_signature and valid_identity and valid_amount and response.get("status") == "COMPLETE"):
+            if not signed_names:
+                raise ValueError("Missing signed_field_names")
+
+            expected = esewa_signature(
+                response, signed_names, config["secret"]
+            )
+            received = response.get("signature", "")
+            valid_signature = hmac.compare_digest(expected, received)
+            valid_identity = (
+                response.get("transaction_uuid")
+                == payment["merchant_transaction_id"]
+                and response.get("product_code") == config["product_code"]
+            )
+            valid_amount = (
+                amount_to_paisa(response.get("total_amount"))
+                == payment["amount_paisa"]
+            )
+            valid_status = str(response.get("status", "")).upper() == "COMPLETE"
+
+            print(
+                "[eSewa callback] Callback verification:",
+                {
+                    "valid_signature": valid_signature,
+                    "valid_identity": valid_identity,
+                    "valid_amount": valid_amount,
+                    "valid_status": valid_status,
+                    "transaction_uuid": response.get("transaction_uuid"),
+                    "expected_transaction_uuid": payment["merchant_transaction_id"],
+                    "product_code": response.get("product_code"),
+                    "callback_amount_paisa": amount_to_paisa(response.get("total_amount")),
+                    "expected_amount_paisa": payment["amount_paisa"],
+                },
+            )
+
+            if not (valid_signature and valid_identity and valid_amount and valid_status):
                 raise ValueError("Invalid eSewa callback")
-            query = urllib.parse.urlencode({
-                "product_code": config["product_code"],
-                "total_amount": amount_to_npr(payment["amount_paisa"]),
-                "transaction_uuid": payment["merchant_transaction_id"],
-            })
-            status, lookup = json_request(f"{config['status_url']}?{query}")
-        except Exception:
+        except Exception as err:
+            print(
+                f"[eSewa callback] Callback verification exception: "
+                f"{type(err).__name__}: {err}"
+            )
             return redirect(frontend_url("invalid", payment_id))
-        if status == 200 and lookup.get("status") == "COMPLETE" and amount_to_paisa(lookup.get("total_amount")) == payment["amount_paisa"]:
-            result = finalize_verified_payment(connection, payment, lookup.get("ref_id") or response.get("transaction_code"))
-        elif lookup.get("status") in {"PENDING", "AMBIGUOUS"}:
+
+        provider_reference = response.get("transaction_code")
+
+        # Do the additional server-to-server status verification.
+        # A temporary DNS/network failure must NOT turn an already-valid
+        # signed COMPLETE callback into an invalid payment.
+        query = urllib.parse.urlencode({
+            "product_code": config["product_code"],
+            "total_amount": amount_to_npr(payment["amount_paisa"]),
+            "transaction_uuid": payment["merchant_transaction_id"],
+        })
+        try:
+            status, lookup = json_request(
+                f"{config['status_url']}?{query}",
+                timeout=15,
+                retries=3,
+            )
+            print(
+                f"[eSewa callback] Transaction status API: "
+                f"HTTP {status}, response={lookup}"
+            )
+        except (urllib.error.URLError, TimeoutError) as err:
+            # The callback is already cryptographically authenticated, and
+            # its UUID, product code, amount, and COMPLETE status all match
+            # the local payment. Treat provider lookup failure as a temporary
+            # verification-service outage rather than a failed payment.
+            print(
+                f"[eSewa callback] Status API unavailable after retries: {err}. "
+                "Finalizing from the valid signed callback."
+            )
+            result = finalize_verified_payment(
+                connection, payment, provider_reference
+            )
+            return redirect(frontend_url(result, payment_id))
+        except Exception as err:
+            print(
+                f"[eSewa callback] Status API exception: "
+                f"{type(err).__name__}: {err}"
+            )
+            return redirect(frontend_url("verification-error", payment_id))
+
+        lookup_status = str(lookup.get("status", "")).upper()
+        lookup_amount = lookup.get("total_amount")
+        if lookup_amount is None:
+            lookup_amount = lookup.get("totalAmount")
+        lookup_amount_paisa = amount_to_paisa(lookup_amount)
+        provider_reference = (
+            lookup.get("ref_id")
+            or lookup.get("refId")
+            or lookup.get("reference_id")
+            or provider_reference
+        )
+
+        print(
+            "[eSewa callback] Final verification:",
+            {
+                "http_status": status,
+                "provider_status": lookup_status,
+                "lookup_amount_paisa": lookup_amount_paisa,
+                "expected_amount_paisa": payment["amount_paisa"],
+                "provider_reference": provider_reference,
+            },
+        )
+
+        if (
+            status == 200
+            and lookup_status == "COMPLETE"
+            and lookup_amount_paisa == payment["amount_paisa"]
+        ):
+            result = finalize_verified_payment(
+                connection, payment, provider_reference
+            )
+        elif lookup_status in {"PENDING", "AMBIGUOUS", "AMBIGIOUS"}:
             result = "pending"
         else:
             now = iso_time(utc_now())
+            failure_reason = (
+                lookup.get("error_message")
+                or lookup.get("message")
+                or lookup_status
+                or f"eSewa status API returned HTTP {status}"
+            )
             connection.execute(
                 "UPDATE PAYMENT SET status = 'FAILED', failure_reason = ?, updated_at = ? WHERE payment_id = ?",
-                (lookup.get("status", "eSewa payment failed"), now, payment_id),
+                (failure_reason, now, payment_id),
             )
             connection.execute(
                 "UPDATE APPOINTMENT SET status = 'Cancelled', payment_status = 'FAILED' WHERE appointment_id = ?",
@@ -385,14 +538,17 @@ def esewa_callback():
             )
             connection.commit()
             result = "failed"
+
         return redirect(frontend_url(result, payment_id))
     finally:
         connection.close()
 
 
+@payments_bp.route("/payments/esewa/failure/<int:payment_id>", methods=["GET"])
 @payments_bp.route("/payments/esewa/failure", methods=["GET"])
-def esewa_failure():
-    payment_id = request.args.get("payment_id", type=int)
+def esewa_failure(payment_id=None):
+    if payment_id is None:
+        payment_id = request.args.get("payment_id", type=int)
     connection = get_db_connection()
     try:
         payment = connection.execute("SELECT * FROM PAYMENT WHERE payment_id = ? AND provider = 'ESEWA'", (payment_id,)).fetchone()
